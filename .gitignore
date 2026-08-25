@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+.pytest_cache/
+.DS_Store
+.venv/
+backups/
+build/
+dist/
+outputs/
+.env
+examples/wangdian_config.py
+data/

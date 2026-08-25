@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>旺店通库存台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div>
+          <h1>旺店通库存台</h1>
+          <p>仓储与商品运营</p>
+        </div>
+      </div>
+      <nav class="side-nav">
+        <span class="side-nav-label">概览</span>
+        <button class="active" type="button" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>数据看板</span></button>
+        <span class="side-nav-label">仓储运营</span>
+        <button type="button" data-view="inventory"><i data-lucide="package-search"></i><span>库存明细</span></button>
+        <button type="button" data-view="inbound"><i data-lucide="package-plus"></i><span>入库分析</span></button>
+        <button type="button" data-view="sales"><i data-lucide="chart-no-axes-combined"></i><span>仓库销量与退货</span></button>
+        <button type="button" data-view="shopSales"><i data-lucide="store"></i><span>分店铺统计</span></button>
+        <span class="side-nav-label">商品经营</span>
+        <button type="button" data-view="shortNames"><i data-lucide="tags"></i><span>简称汇总</span></button>
+        <button type="button" data-view="replenishment"><i data-lucide="triangle-alert"></i><span>库存预警</span></button>
+        <button type="button" data-view="purchasePlan"><i data-lucide="calendar-clock"></i><span>采购计划</span></button>
+        <button type="button" data-view="transferPlan"><i data-lucide="arrow-right-left"></i><span>调拨建议</span></button>
+        <button type="button" data-view="clearanceSummary"><i data-lucide="badge-dollar-sign"></i><span>清仓汇总</span></button>
+      </nav>
+      <div class="sidebar-status">
+        <div id="envPill" class="env-pill"><span class="status-dot"></span><span>连接中</span></div>
+        <span id="lastSync" class="last-sync">尚未同步</span>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <h2 id="pageTitle">数据看板</h2>
+          <p id="pageSubtitle">整体仓储与近期经营概览</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="syncButton" class="button button-primary" type="button">
+            <i data-lucide="refresh-cw"></i><span>刷新库存</span>
+          </button>
+        </div>
+      </header>
+
+      <main>
+      <section id="noticeBar" class="notice-bar hidden" aria-live="polite"></section>
+      <section class="filter-band" aria-label="筛选条件">
+        <input id="startDate" type="hidden">
+        <input id="endDate" type="hidden">
+        <label class="select-control warehouse-control">
+          <i data-lucide="warehouse"></i>
+          <select id="warehouseSelect" aria-label="仓库">
+            <option value="">全部仓库</option>
+          </select>
+        </label>
+        <label class="select-control status-control">
+          <i data-lucide="list-filter"></i>
+          <select id="stockStatusSelect" aria-label="库存状态">
+            <option value="">全部库存状态</option>
+            <option value="positive">有库存</option>
+            <option value="zero">零库存</option>
+            <option value="negative">负库存</option>
+            <option value="unavailable">无可用库存</option>
+          </select>
+        </label>
+        <label class="select-control purchase-trend-control hidden">
+          <i data-lucide="activity"></i>
+          <select id="purchaseTrendSelect" aria-label="趋势系数区间">
+            <option value="">全部趋势系数</option>
+            <option value="down">下降（小于 0.8）</option>
+            <option value="stable">平稳（0.8 - 1.2）</option>
+            <option value="up">上涨（1.2 以上）</option>
+            <option value="surge">爆发（1.8 以上）</option>
+          </select>
+        </label>
+        <label class="select-control purchase-status-control hidden">
+          <i data-lucide="list-filter"></i>
+          <select id="purchaseStatusSelect" aria-label="采购计划状态">
+            <option value="">全部状态</option>
+            <option value="交期内预计缺货">交期内预计缺货</option>
+            <option value="调拨后仍缺货">调拨后仍缺货</option>
+            <option value="计划下单">计划下单</option>
+          </select>
+        </label>
+        <label class="select-control alert-status-control hidden">
+          <i data-lucide="list-filter"></i>
+          <select id="alertStatusSelect" aria-label="库存预警状态">
+            <option value="">全部预警状态</option>
+            <option value="库存预警">库存预警（90 - 180 天）</option>
+            <option value="中度积压">中度积压（180 - 365 天）</option>
+            <option value="严重积压">严重积压（超过 365 天）</option>
+            <option value="清仓预警">清仓预警</option>
+          </select>
+        </label>
+        <label class="search-control">
+          <i data-lucide="search"></i>
+          <input id="searchInput" type="search" placeholder="搜索简称、货品、条码或商家编码">
+          <kbd>/</kbd>
+        </label>
+        <a id="exportButton" class="button button-secondary" href="#" download>
+          <i data-lucide="download"></i><span>导出</span>
+        </a>
+      </section>
+
+      <section id="dashboardView" class="dashboard-view">
+        <div class="dashboard-heading">
+          <div>
+            <h2>仓储运营概览</h2>
+            <p id="dashboardRange">正在读取经营数据</p>
+          </div>
+          <div class="dashboard-heading-controls">
+            <div class="segmented dashboard-period" aria-label="经营数据周期">
+              <button type="button" data-dashboard-days="7">近 7 天</button>
+              <button class="active" type="button" data-dashboard-days="30">近 30 天</button>
+            </div>
+            <a id="dailyReportButton" class="button button-secondary" href="/api/reports/daily.xlsx" download title="导出上一同步日的运营与采购日报"><i data-lucide="file-down"></i><span>导出日报</span></a>
+            <a id="weeklyReportButton" class="button button-secondary" href="/api/reports/weekly.xlsx" download title="导出最近七天的运营与采购周报"><i data-lucide="file-chart-column"></i><span>导出周报</span></a>
+            <div id="dashboardToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+      <section class="metric-band dashboard-metrics" aria-label="关键指标">
+        <div class="metric">
+          <span class="metric-label">当前库存</span>
+          <strong id="metricStock">--</strong>
+          <small id="metricSnapshot">快照 --</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">可用库存</span>
+          <strong id="metricAvailable">--</strong>
+          <small id="metricStockRate">可用率 --</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">采购在途</span>
+          <strong id="metricTransit">--</strong>
+          <small>来自库存查询接口</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">在库 SKU</span>
+          <strong id="metricStockValue">--</strong>
+          <small>当前销售仓商品数</small>
+        </div>
+        <div class="metric metric-emphasis">
+          <span class="metric-label">区间发货量</span>
+          <strong id="metricSales">--</strong>
+          <small id="metricSalesPeriod">近 30 天</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">区间净发货</span>
+          <strong id="metricNetSales">--</strong>
+          <small id="metricReturnRate">退货率 --</small>
+        </div>
+        <div class="metric metric-return">
+          <span class="metric-label">区间退货</span>
+          <strong id="metricReturn">--</strong>
+          <small id="metricReturnPeriod">当前经营期间</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">采购入库</span>
+          <strong id="metricPurchase">--</strong>
+          <small>当前经营期间</small>
+        </div>
+        <div class="metric">
+          <span class="metric-label">库存风险 SKU</span>
+          <strong id="metricUnavailable">--</strong>
+          <small id="metricRiskNote">负库存 --</small>
+        </div>
+      </section>
+
+      <section class="analytics-band">
+        <div class="trend-panel">
+          <div class="section-heading">
+            <div><h2>每日发货与退货走势</h2><p>基于已同步的出入库和订单数据</p></div>
+            <div class="legend"><span><i class="legend-sales"></i>发货</span><span><i class="legend-return"></i>退货</span><span><i class="legend-net"></i>净发货</span></div>
+          </div>
+          <div class="chart-wrap"><canvas id="trendChart" aria-label="每日发货与退货走势"></canvas><div id="chartTooltip" class="chart-tooltip hidden"></div></div>
+        </div>
+        <div class="ranking-panel">
+          <div class="section-heading"><div><h2>库存量最高 SKU</h2><p>当前销售仓合计</p></div></div>
+          <ol id="topSkuList" class="ranking-list"></ol>
+        </div>
+      </section>
+
+      <section class="dashboard-detail-grid">
+        <section class="dashboard-panel warehouse-overview">
+          <div class="section-heading"><div><h2>仓库库存分布</h2><p>按当前库存排序，含采购在途</p></div><span id="warehouseOverviewCount" class="panel-note">--</span></div>
+          <div id="warehouseOverview" class="warehouse-overview-list"></div>
+        </section>
+        <section class="dashboard-panel inventory-health">
+          <div class="section-heading"><div><h2>库存健康度</h2><p>按 SKU 当前可用库存状态</p></div></div>
+          <div id="inventoryHealth" class="health-list"></div>
+          <div class="health-footnote">库存风险包含无可用库存与负库存 SKU，建议优先进入库存明细核对。</div>
+        </section>
+      </section>
+      </section>
+
+
+      <section id="inventoryView" class="table-section hidden">
+        <div class="section-heading table-heading">
+          <div>
+            <h2>库存明细</h2>
+            <p id="resultCount">正在读取数据</p>
+          </div>
+          <div class="table-key">
+            <span><i class="key-low"></i>无可用库存</span>
+            <span><i class="key-return"></i>负库存</span>
+          </div>
+        </div>
+        <div id="inventoryToolbarSlot" class="view-toolbar-slot table-toolbar"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="sticky-col"><button data-sort="sku_no">商家编码</button></th>
+                <th>简称 / 商品</th>
+                <th class="numeric"><button data-sort="stock_num">当前库存</button></th>
+                <th class="numeric"><button data-sort="available_num">可用库存</button></th>
+                <th class="numeric">采购在途</th>
+                <th class="numeric"><button data-sort="warehouse_count">分仓数</button></th>
+                <th>最后更新</th>
+                <th>库存状态</th>
+                <th class="action-cell"><span class="sr-only">操作</span></th>
+              </tr>
+            </thead>
+            <tbody id="inventoryBody"></tbody>
+          </table>
+          <div id="tableLoading" class="loading-state">
+            <div class="spinner"></div><span>正在汇总库存数据</span>
+          </div>
+          <div id="emptyState" class="empty-state hidden">
+            <i data-lucide="package-open"></i>
+            <strong>没有符合条件的库存记录</strong>
+            <span>调整日期、仓库或搜索条件</span>
+          </div>
+        </div>
+        <div class="table-footer">
+          <span id="pageInfo">第 1 页</span>
+          <label>每页
+            <select id="pageSizeSelect">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <div class="page-actions">
+            <button id="previousPage" class="button button-secondary" type="button">上一页</button>
+            <button id="nextPage" class="button button-secondary" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="inboundView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>仓库 SKU 入库分析</h2>
+            <p id="inboundResultCount">正在读取数据</p>
+          </div>
+          <div class="inbound-controls">
+            <label class="select-control inbound-type-control">
+              <i data-lucide="package-plus"></i>
+              <select id="inboundTypeSelect" aria-label="入库类型">
+                <option value="">全部入库类型</option>
+                <option value="1">采购入库</option>
+                <option value="2">调拨入库</option>
+                <option value="3">退货入库</option>
+                <option value="4">盘盈入库</option>
+                <option value="5">生产入库</option>
+                <option value="6">其他入库</option>
+                <option value="8">委外仓入库</option>
+                <option value="9">委外入库</option>
+                <option value="10">委外盘盈入库</option>
+                <option value="11">直发入库</option>
+                <option value="15">纠错入库</option>
+                <option value="16">预入库</option>
+              </select>
+            </label>
+            <div class="date-range sales-date-range">
+              <label><span>开始</span><input id="inboundStartDate" type="date"></label>
+              <span class="date-separator">至</span>
+              <label><span>结束</span><input id="inboundEndDate" type="date"></label>
+            </div>
+            <div id="inboundToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary inbound-summary">
+          <span>总入库 <strong id="inboundTotalQty">--</strong></span>
+          <span>采购入库 <strong id="inboundPurchaseQty">--</strong></span>
+          <span>退货入库 <strong id="inboundReturnQty">--</strong></span>
+          <span>调拨入库 <strong id="inboundTransferQty">--</strong></span>
+          <span>其他入库 <strong id="inboundOtherQty">--</strong></span>
+          <span>涉及 SKU <strong id="inboundSkuCount">--</strong></span>
+        </div>
+        <div id="inboundDaily" class="inbound-daily" aria-label="每日入库汇总"></div>
+        <div class="table-wrap sales-table-wrap inbound-table-wrap">
+          <table class="inbound-table">
+            <thead>
+              <tr>
+                <th>仓库</th>
+                <th>商家编码</th>
+                <th>简称 / 商品</th>
+                <th class="numeric">总入库</th>
+                <th class="numeric">采购</th>
+                <th class="numeric">退货</th>
+                <th class="numeric">调拨</th>
+                <th class="numeric">其他</th>
+                <th class="numeric">来源单数</th>
+                <th>退货原始单号</th>
+                <th>最后入库</th>
+              </tr>
+            </thead>
+            <tbody id="inboundBody"></tbody>
+          </table>
+          <div id="inboundLoading" class="loading-state hidden">
+            <div class="spinner"></div><span>正在汇总入库流水</span>
+          </div>
+          <div id="inboundEmptyState" class="empty-state hidden">
+            <i data-lucide="package-open"></i>
+            <strong>该范围没有入库流水</strong>
+            <span>调整日期、仓库、入库类型或商品搜索条件</span>
+          </div>
+        </div>
+        <div class="table-footer">
+          <span id="inboundPageInfo">第 1 页</span>
+          <label>每页
+            <select id="inboundPageSizeSelect">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <div class="page-actions">
+            <button id="inboundPreviousPage" class="button button-secondary" type="button">上一页</button>
+            <button id="inboundNextPage" class="button button-secondary" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="salesView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>仓库 SKU 销量与退货</h2>
+            <p id="salesResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div class="date-range sales-date-range">
+              <label><span>开始</span><input id="salesStartDate" type="date"></label>
+              <span class="date-separator">至</span>
+              <label><span>结束</span><input id="salesEndDate" type="date"></label>
+            </div>
+            <div id="salesToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>发货销量 <strong id="salesTotalQty">--</strong></span>
+          <span>近7日发货 <strong id="sales7dQty">--</strong></span>
+          <span>近15日发货 <strong id="sales15dQty">--</strong></span>
+          <span>近30日发货 <strong id="sales30dQty">--</strong></span>
+          <span>实际退货 <strong id="salesReturnQty">--</strong></span>
+          <span>净销量 <strong id="salesNetQty">--</strong></span>
+          <span>仓库 <strong id="salesWarehouseCount">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>仓库</th>
+                <th class="sticky-sales-sku">商家编码</th>
+                <th>简称 / 商品</th>
+                <th class="numeric">发货销量</th>
+                <th class="numeric">实际退货</th>
+                <th class="numeric">净销量</th>
+                <th class="numeric">近7日销量</th>
+                <th class="numeric">近15日销量</th>
+                <th class="numeric">近30日销量</th>
+                <th class="numeric">当前库存</th>
+                <th class="numeric">可用库存</th>
+                <th class="numeric">采购在途</th>
+                <th class="numeric">趋势系数</th>
+                <th class="numeric">剩余库存天数（含在途）</th>
+                <th>预计缺货日（含在途）</th>
+              </tr>
+            </thead>
+            <tbody id="salesBody"></tbody>
+          </table>
+          <div id="salesLoading" class="loading-state hidden">
+            <div class="spinner"></div><span>正在汇总仓库销量</span>
+          </div>
+          <div id="salesEmptyState" class="empty-state hidden">
+            <i data-lucide="package-open"></i>
+            <strong>该日期没有销售或退货流水</strong>
+            <span>调整日期、仓库或搜索条件</span>
+          </div>
+        </div>
+        <div class="table-footer">
+          <span id="salesPageInfo">第 1 页</span>
+          <label>每页
+            <select id="salesPageSizeSelect">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <div class="page-actions">
+            <button id="salesPreviousPage" class="button button-secondary" type="button">上一页</button>
+            <button id="salesNextPage" class="button button-secondary" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="shopSalesView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>分店铺销量与退货</h2>
+            <p id="shopSalesResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div class="date-range sales-date-range">
+              <label><span>开始</span><input id="shopSalesStartDate" type="date"></label>
+              <span class="date-separator">至</span>
+              <label><span>结束</span><input id="shopSalesEndDate" type="date"></label>
+            </div>
+            <label class="select-control shop-sales-shop-control">
+              <i data-lucide="store"></i>
+              <select id="shopSalesShopSelect" aria-label="店铺"><option value="">全部店铺</option></select>
+            </label>
+            <div id="shopSalesToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>店铺数 <strong id="shopSalesShopCount">--</strong></span>
+          <span>SKU 数 <strong id="shopSalesSkuCount">--</strong></span>
+          <span>发货销量 <strong id="shopSalesTotalQty">--</strong></span>
+          <span>实际退货 <strong id="shopSalesReturnQty">--</strong></span>
+          <span>净销量 <strong id="shopSalesNetQty">--</strong></span>
+          <span>销售金额 <strong id="shopSalesAmount">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap shop-sales-table-wrap">
+          <table>
+            <thead><tr>
+              <th>店铺</th><th>店铺编号</th><th>简称 / 商品</th><th>商家编码</th>
+              <th class="numeric">发货销量</th><th class="numeric">实际退货</th>
+              <th class="numeric">净销量</th><th class="numeric">销售金额</th><th>发货仓</th>
+            </tr></thead>
+            <tbody id="shopSalesBody"></tbody>
+          </table>
+          <div id="shopSalesLoading" class="loading-state hidden"><div class="spinner"></div><span>正在按店铺汇总销量</span></div>
+          <div id="shopSalesEmptyState" class="empty-state hidden"><i data-lucide="package-open"></i><strong>该日期没有可识别的店铺销售数据</strong><span>调整日期、店铺、仓库或商品搜索条件</span></div>
+        </div>
+        <div class="table-footer">
+          <span id="shopSalesPageInfo">第 1 页</span>
+          <label>每页<select id="shopSalesPageSizeSelect"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option></select></label>
+          <div class="page-actions"><button id="shopSalesPreviousPage" class="button button-secondary" type="button">上一页</button><button id="shopSalesNextPage" class="button button-secondary" type="button">下一页</button></div>
+        </div>
+      </section>
+
+      <section id="shortNamesView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>商品简称销量汇总</h2>
+            <p id="shortResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div class="date-range sales-date-range">
+              <label><span>开始</span><input id="shortStartDate" type="date"></label>
+              <span class="date-separator">至</span>
+              <label><span>结束</span><input id="shortEndDate" type="date"></label>
+            </div>
+            <div id="shortNamesToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>发货量 <strong id="shortSalesQty">--</strong></span>
+          <span>实退量 <strong id="shortReturnQty">--</strong></span>
+          <span>公司净发货 <strong id="shortNetQty">--</strong></span>
+          <span>简称数 <strong id="shortNameCount">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap short-table-wrap">
+          <table class="short-name-table">
+            <thead>
+              <tr>
+                <th>商品简称</th>
+                <th>包含货品</th>
+                <th class="numeric">SKU 数</th>
+                <th class="numeric">发货量</th>
+                <th class="numeric">实退量</th>
+                <th class="numeric">公司净发货</th>
+                <th class="numeric">当前库存</th>
+                <th>发货仓分布（非平台渠道）</th>
+              </tr>
+            </thead>
+            <tbody id="shortNamesBody"></tbody>
+          </table>
+          <div id="shortLoading" class="loading-state hidden">
+            <div class="spinner"></div><span>正在按简称汇总销量</span>
+          </div>
+          <div id="shortEmptyState" class="empty-state hidden">
+            <i data-lucide="package-open"></i>
+            <strong>该日期没有可汇总的销售或退货流水</strong>
+          </div>
+        </div>
+        <div class="table-footer">
+          <span id="shortPageInfo">第 1 页</span>
+          <label>每页
+            <select id="shortPageSizeSelect">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <div class="page-actions">
+            <button id="shortPreviousPage" class="button button-secondary" type="button">上一页</button>
+            <button id="shortNextPage" class="button button-secondary" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="replenishmentView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>SKU 预测库存预警</h2>
+            <p id="replenishmentResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div id="replenishmentModeSwitch" class="segmented replenishment-mode-switch" aria-label="库存预警模式">
+              <button type="button" data-replenishment-mode="normal" class="active">正常预警</button>
+              <button type="button" data-replenishment-mode="clearance">清仓预警</button>
+            </div>
+            <div class="analysis-range">
+              <label>统计截止 <input id="replenishmentEndDate" type="date"></label>
+              <span id="replenishmentRange">--</span>
+            </div>
+            <div id="replenishmentToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>90 - 180 天 <strong id="replenishCount">--</strong></span>
+          <span>180 - 365 天 <strong id="stockoutCount">--</strong></span>
+          <span>超过 365 天 <strong id="stagnantCount">--</strong></span>
+          <span>清仓预警 <strong id="clearanceAlertCount">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap replenishment-table-wrap">
+          <table class="replenishment-table">
+            <thead><tr>
+              <th>预警仓</th><th>简称 / 商品</th><th>商家编码</th><th class="numeric">仓库可用</th>
+              <th class="numeric">采购在途</th><th class="numeric">7日销量</th>
+              <th class="numeric">15日销量</th><th class="numeric">30日销量</th><th class="numeric">趋势系数</th>
+              <th class="numeric">预测日均</th><th class="numeric">预测库存天数</th>
+              <th class="numeric">含在途库存天数</th><th>预警状态</th>
+            </tr></thead>
+            <tbody id="replenishmentBody"></tbody>
+          </table>
+          <div id="replenishmentLoading" class="loading-state hidden"><div class="spinner"></div><span>正在计算库存预警</span></div>
+          <div id="replenishmentEmptyState" class="empty-state hidden"><i data-lucide="package-open"></i><strong>当前筛选条件下没有库存预警</strong></div>
+        </div>
+        <div class="table-footer">
+          <span id="replenishmentPageInfo">第 1 页</span>
+          <label>每页<select id="replenishmentPageSizeSelect"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option></select></label>
+          <div class="page-actions"><button id="replenishmentPreviousPage" class="button button-secondary" type="button">上一页</button><button id="replenishmentNextPage" class="button button-secondary" type="button">下一页</button></div>
+        </div>
+      </section>
+
+      <section id="purchasePlanView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>采购计划</h2>
+            <p id="purchasePlanResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div class="analysis-range">
+              <label>统计截止 <input id="purchasePlanEndDate" type="date"></label>
+              <span id="purchasePlanRange">--</span>
+            </div>
+            <div id="purchasePlanToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>严重缺货 <strong id="purchasePlanRiskCount">--</strong></span>
+          <span>本周下单 <strong id="purchasePlanWeekCount">--</strong></span>
+          <span>后续排期 <strong id="purchasePlanPlannedCount">--</strong></span>
+          <span>低销量观察 <strong id="purchasePlanLowDemandCount">--</strong></span>
+          <span>计算采购量 <strong id="purchasePlanCalculatedQty">--</strong></span>
+          <span>MOQ 补足量 <strong id="purchasePlanMoqUpliftQty">--</strong></span>
+          <span>建议下单量 <strong id="purchasePlanQty">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap replenishment-table-wrap">
+          <table class="replenishment-table purchase-plan-table">
+            <thead><tr>
+              <th>采购时机</th><th>建议下单日</th><th>目标仓</th><th>简称 / 商品</th><th>供应商</th><th>四大结构</th><th>产线</th><th>产能</th>
+              <th class="numeric">生产天数</th><th class="numeric">提前/预留</th>
+              <th class="numeric">可用库存</th><th class="numeric">采购在途</th>
+              <th class="numeric">建议调拨</th>
+              <th class="numeric">趋势系数</th><th class="numeric">日销量</th>
+              <th>预计缺货日</th><th class="numeric">MOQ</th><th class="numeric">计算采购量</th><th class="numeric">建议下单量</th>
+            </tr></thead>
+            <tbody id="purchasePlanBody"></tbody>
+          </table>
+          <div id="purchasePlanLoading" class="loading-state hidden"><div class="spinner"></div><span>正在生成采购计划</span></div>
+          <div id="purchasePlanEmptyState" class="empty-state hidden"><i data-lucide="package-open"></i><strong>没有符合条件的采购计划</strong></div>
+        </div>
+        <div class="table-footer">
+          <span id="purchasePlanPageInfo">第 1 页</span>
+          <label>每页<select id="purchasePlanPageSizeSelect"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option></select></label>
+          <div class="page-actions"><button id="purchasePlanPreviousPage" class="button button-secondary" type="button">上一页</button><button id="purchasePlanNextPage" class="button button-secondary" type="button">下一页</button></div>
+        </div>
+      </section>
+
+      <section id="transferPlanView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>调拨建议</h2>
+            <p id="transferPlanResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <div class="analysis-range">
+              <label>统计截止 <input id="transferPlanEndDate" type="date"></label>
+              <span id="transferPlanRange">--</span>
+            </div>
+            <div id="transferPlanToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary">
+          <span>建议调拨量 <strong id="transferPlanQty">--</strong></span>
+          <span>涉及 SKU <strong id="transferPlanSkuCount">--</strong></span>
+          <span>目标仓 <strong id="transferPlanWarehouseCount">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap replenishment-table-wrap">
+          <table class="replenishment-table purchase-plan-table">
+            <thead><tr>
+              <th>来源仓</th><th>目标仓</th><th>简称 / 商品</th><th>SKU</th>
+              <th class="numeric">建议调拨量</th><th class="numeric">目标仓修正日均</th><th>目标仓预计缺货日</th>
+            </tr></thead>
+            <tbody id="transferPlanBody"></tbody>
+          </table>
+          <div id="transferPlanLoading" class="loading-state hidden"><div class="spinner"></div><span>正在计算调拨建议</span></div>
+          <div id="transferPlanEmptyState" class="empty-state hidden"><i data-lucide="package-check"></i><strong>当前没有可安全调拨的建议</strong></div>
+        </div>
+        <div class="table-footer">
+          <span id="transferPlanPageInfo">第 1 页</span>
+          <label>每页<select id="transferPlanPageSizeSelect"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option></select></label>
+          <div class="page-actions"><button id="transferPlanPreviousPage" class="button button-secondary" type="button">上一页</button><button id="transferPlanNextPage" class="button button-secondary" type="button">下一页</button></div>
+        </div>
+      </section>
+
+      <section id="clearanceSummaryView" class="table-section hidden">
+        <div class="section-heading table-heading sales-heading">
+          <div>
+            <h2>清仓汇总</h2>
+            <p id="clearanceSummaryResultCount">正在读取数据</p>
+          </div>
+          <div class="page-heading-controls">
+            <p id="clearanceSummaryUpdated" class="analysis-range">最近更新 --</p>
+            <div id="clearanceSummaryToolbarSlot" class="view-toolbar-slot"></div>
+          </div>
+        </div>
+        <div class="sales-summary clearance-summary">
+          <span>清仓 SKU <strong id="clearanceSummarySkuCount">--</strong></span>
+          <span>涉及仓库 <strong id="clearanceSummaryWarehouseCount">--</strong></span>
+          <span>库存数量 <strong id="clearanceSummaryStockQty">--</strong></span>
+          <span>可用数量 <strong id="clearanceSummaryAvailableQty">--</strong></span>
+          <span>采购库存成本 <strong id="clearanceSummaryPurchaseCost">--</strong></span>
+          <span>采购价未配置 <strong id="clearanceSummaryMissingPurchasePrice">--</strong></span>
+        </div>
+        <div class="table-wrap sales-table-wrap clearance-summary-table-wrap">
+          <table class="clearance-summary-table">
+            <thead><tr>
+              <th>仓库</th><th>简称 / 商品</th><th>商家编码</th><th>供应商</th>
+              <th class="numeric">库存数量</th><th class="numeric">可用数量</th>
+              <th class="numeric">采购价</th><th class="numeric">采购库存成本</th><th>库存更新时间</th>
+            </tr></thead>
+            <tbody id="clearanceSummaryBody"></tbody>
+          </table>
+          <div id="clearanceSummaryLoading" class="loading-state hidden"><div class="spinner"></div><span>正在汇总清仓库存</span></div>
+          <div id="clearanceSummaryEmptyState" class="empty-state hidden"><i data-lucide="package-open"></i><strong>当前没有清仓库存</strong></div>
+        </div>
+        <div class="table-footer">
+          <span id="clearanceSummaryPageInfo">第 1 页</span>
+          <label>每页<select id="clearanceSummaryPageSizeSelect"><option value="50">50</option><option value="100" selected>100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option></select></label>
+          <div class="page-actions"><button id="clearanceSummaryPreviousPage" class="button button-secondary" type="button">上一页</button><button id="clearanceSummaryNextPage" class="button button-secondary" type="button">下一页</button></div>
+        </div>
+      </section>
+    </main>
+    </div>
+  </div>
+
+  <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="skuDrawer" class="sku-drawer" aria-hidden="true" aria-label="SKU 详情">
+    <div class="drawer-header">
+      <div>
+        <span id="drawerSku" class="mono">--</span>
+        <h2 id="drawerTitle">SKU 详情</h2>
+        <p id="drawerSpec">--</p>
+      </div>
+      <button id="drawerClose" class="icon-button" type="button" title="关闭" aria-label="关闭">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div id="drawerContent" class="drawer-content"></div>
+  </aside>
+
+  <dialog id="syncDialog" class="sync-dialog">
+    <form method="dialog" id="syncForm">
+      <div class="dialog-header">
+        <div>
+          <h2>刷新当前库存</h2>
+          <p id="syncEnvironment">--</p>
+        </div>
+        <button class="icon-button" value="cancel" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="sync-scope">
+        <div><i data-lucide="package-search"></i><span>当前库存</span></div>
+        <div><i data-lucide="warehouse"></i><span>分仓库存</span></div>
+        <div><i data-lucide="calendar-check"></i><span>当日快照</span></div>
+      </div>
+      <p id="syncMessage" class="dialog-message hidden"></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" value="cancel">取消</button>
+        <button id="syncSubmit" class="button button-primary" type="submit">
+          <i data-lucide="refresh-cw"></i><span>开始刷新</span>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

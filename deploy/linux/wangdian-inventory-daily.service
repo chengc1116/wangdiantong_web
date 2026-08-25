@@ -1,0 +1,16 @@
+[Unit]
+Description=WangDian inventory daily synchronization and report export
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/wangyewangdian
+Environment=PYTHONPATH=/opt/wangyewangdian/src
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/wangyewangdian/.venv/bin/python -m wangdian_inventory.app --daily-job --no-browser
+StandardOutput=append:/opt/wangyewangdian/data/daily-sync.log
+StandardError=append:/opt/wangyewangdian/data/daily-sync-error.log
+
+[Install]
+WantedBy=default.target

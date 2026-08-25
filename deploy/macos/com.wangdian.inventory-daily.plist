@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wangdian.inventory-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tmt/wangyewangdian/.venv/bin/python</string>
+    <string>-m</string>
+    <string>wangdian_inventory.app</string>
+    <string>--daily-job</string>
+    <string>--no-browser</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/tmt/wangyewangdian</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/tmt/wangyewangdian/src</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>1</integer>
+    <key>Minute</key>
+    <integer>10</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/tmt/wangyewangdian/data/daily-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tmt/wangyewangdian/data/daily-sync-error.log</string>
+</dict>
+</plist>

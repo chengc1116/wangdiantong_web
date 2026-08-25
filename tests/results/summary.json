@@ -1,0 +1,14 @@
+{
+  "environment": "production",
+  "exported_at": "2026-07-31T14:29:23+08:00",
+  "shops": {
+    "total": 103,
+    "enabled": 66,
+    "disabled": 37
+  },
+  "warehouses": {
+    "total": 52,
+    "enabled": 26,
+    "disabled": 26
+  }
+}

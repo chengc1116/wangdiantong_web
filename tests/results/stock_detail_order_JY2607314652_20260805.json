@@ -1,0 +1,52 @@
+{
+  "queried_at": "2026-08-05T16:20:07+08:00",
+  "environment": "production",
+  "endpoint": "stock_detail_report_query",
+  "request_scope": {
+    "start_time": "2026-07-31 00:00:00",
+    "end_time": "2026-07-31 23:59:59",
+    "src_order_no_target": "JY2607314652",
+    "sku_no_list": [
+      "TJRP006F133JSCA0CC",
+      "TJRP006F333JSCA0CC"
+    ]
+  },
+  "api_records_matching_order": [
+    {
+      "sku_no": "TJRP006F133JSCA0CC",
+      "sku_name": "蓝色 7.5cm*4.6m",
+      "spu_short_name": "JR07",
+      "warehouse_id": "39",
+      "warehouse_name": "主仓库（新）",
+      "in_out_type": "销售订单",
+      "src_order_no": "JY2607314652",
+      "src_id": "2856221673135276140",
+      "src_detail_id": "2856221673135281260",
+      "out_num": "6",
+      "num": "6",
+      "create_date": "2026-07-31 17:27:37",
+      "position_id": "3146930000024449",
+      "position_no": "A01-05-01-04",
+      "stockout_no": "JY2607314652"
+    },
+    {
+      "sku_no": "TJRP006F333JSCA0CC",
+      "sku_name": "肤色 7.5cm*4.6m",
+      "spu_short_name": "JR07",
+      "warehouse_id": "39",
+      "warehouse_name": "主仓库（新）",
+      "in_out_type": "销售订单",
+      "src_order_no": "JY2607314652",
+      "src_id": "2856221673135276140",
+      "src_detail_id": "2856221673135279212",
+      "out_num": "16",
+      "num": "16",
+      "create_date": "2026-07-31 17:27:37",
+      "position_id": "3146930000024447",
+      "position_no": "A01-05-01-02",
+      "stockout_no": "JY2607314652"
+    }
+  ],
+  "api_sales_quantity": 22.0,
+  "note": "This is the records returned by the public API; it is not the WangDian UI export."
+}

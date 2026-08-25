@@ -1,0 +1,10 @@
+[Unit]
+Description=Run WangDian inventory daily job at 01:10
+
+[Timer]
+OnCalendar=*-*-* 01:10:00
+Persistent=true
+Unit=wangdian-inventory-daily.service
+
+[Install]
+WantedBy=timers.target

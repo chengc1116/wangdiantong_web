@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wangdian.inventory-web</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tmt/wangyewangdian/.venv/bin/python</string>
+    <string>-m</string>
+    <string>wangdian_inventory.app</string>
+    <string>--lan</string>
+    <string>--port</string>
+    <string>5052</string>
+    <string>--no-browser</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/tmt/wangyewangdian</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/tmt/wangyewangdian/src</string>
+  </dict>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/tmt/wangyewangdian/data/web.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tmt/wangyewangdian/data/web-error.log</string>
+</dict>
+</plist>

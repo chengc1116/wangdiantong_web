@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS products (
     production_line TEXT NOT NULL DEFAULT '',
     production_capacity TEXT NOT NULL DEFAULT '',
     spec_remark TEXT NOT NULL DEFAULT '',
+    goods_remark TEXT NOT NULL DEFAULT '',
     erp_price REAL,
     metadata_status TEXT NOT NULL DEFAULT '待补充',
     metadata_source TEXT NOT NULL DEFAULT '',
@@ -406,6 +407,7 @@ class InventoryDatabase:
                 "production_line": "ALTER TABLE products ADD COLUMN production_line TEXT NOT NULL DEFAULT ''",
                 "production_capacity": "ALTER TABLE products ADD COLUMN production_capacity TEXT NOT NULL DEFAULT ''",
                 "spec_remark": "ALTER TABLE products ADD COLUMN spec_remark TEXT NOT NULL DEFAULT ''",
+                "goods_remark": "ALTER TABLE products ADD COLUMN goods_remark TEXT NOT NULL DEFAULT ''",
                 "erp_price": "ALTER TABLE products ADD COLUMN erp_price REAL",
                 "metadata_status": "ALTER TABLE products ADD COLUMN metadata_status TEXT NOT NULL DEFAULT '待补充'",
                 "metadata_source": "ALTER TABLE products ADD COLUMN metadata_source TEXT NOT NULL DEFAULT ''",
@@ -416,15 +418,22 @@ class InventoryDatabase:
                     connection.execute(statement)
             # Backfill fields that are already present in previously captured
             # WangDian payloads. Goods-query payloads use spec remark directly
-            # and prop1 for ERP price; stock payloads may only contain remark.
+            # and prop1 for ERP price. Do not use the generic `remark` field as
+            # a spec-remark fallback: it is the goods-level remark in goods_query.
             connection.execute(
                 """
                 UPDATE products
                 SET spec_remark=COALESCE(NULLIF(spec_remark,''),
-                    NULLIF(json_extract(raw_json,'$.spec_remark'),''),
-                    NULLIF(json_extract(raw_json,'$.sku_remark'),''),
-                    NULLIF(json_extract(raw_json,'$.remark'),''), '')
+                    NULLIF(json_extract(raw_json,'$.spec_remark'),''), '')
                 WHERE COALESCE(spec_remark,'')=''
+                """
+            )
+            connection.execute(
+                """
+                UPDATE products
+                SET goods_remark=COALESCE(NULLIF(goods_remark,''),
+                    NULLIF(json_extract(raw_json,'$.goods_remark'),''), '')
+                WHERE COALESCE(goods_remark,'')=''
                 """
             )
             connection.execute(
@@ -530,9 +539,15 @@ class InventoryDatabase:
             sku_no = str(item.get("sku_no") or item.get("spec_no") or "").strip()
             if not sku_no:
                 continue
-            remark = str(item.get("sku_remark") or item.get("remark") or "")
+            goods_remark = str(item.get("goods_remark") or "").strip()
+            # `remark` is retained as a legacy goods-level input for callers
+            # that have not been upgraded yet; it must never populate
+            # spec_remark.
+            legacy_goods_remark = str(item.get("remark") or "").strip()
+            goods_remark = goods_remark or legacy_goods_remark
+            remark = str(item.get("sku_remark") or goods_remark or "")
             spec_remark = str(
-                item.get("spec_remark") or item.get("sku_remark") or item.get("remark") or ""
+                item.get("spec_remark") or item.get("sku_remark") or ""
             ).strip()
             raw_erp_price = item.get("erp_price")
             if raw_erp_price in (None, ""):
@@ -566,6 +581,7 @@ class InventoryDatabase:
                     str(item.get("production_line") or "").strip(),
                     str(item.get("production_capacity") or "").strip(),
                     spec_remark,
+                    goods_remark,
                     erp_price,
                     now,
                     json.dumps(item, ensure_ascii=False, separators=(",", ":")),
@@ -581,8 +597,8 @@ class InventoryDatabase:
                     supplier_id, supplier_no, supplier_name,
                     retail_price, wholesale_price, purchase_price, product_structure,
                     production_days, production_line, production_capacity, spec_remark,
-                    erp_price, updated_at, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    goods_remark, erp_price, updated_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sku_no) DO UPDATE SET
                     goods_no=COALESCE(NULLIF(excluded.goods_no, ''), products.goods_no),
                     goods_name=COALESCE(NULLIF(excluded.goods_name, ''), products.goods_name),
@@ -601,7 +617,21 @@ class InventoryDatabase:
                     production_days=CASE WHEN excluded.production_days IS NULL THEN products.production_days ELSE excluded.production_days END,
                     production_line=COALESCE(NULLIF(excluded.production_line, ''), products.production_line),
                     production_capacity=COALESCE(NULLIF(excluded.production_capacity, ''), products.production_capacity),
-                    spec_remark=COALESCE(NULLIF(excluded.spec_remark, ''), products.spec_remark),
+                    -- Only a goods_query upsert (which carries the explicit
+                    -- goods_remark key in raw_json) may clear/replace an
+                    -- existing spec remark. Sales, returns and inventory
+                    -- payloads do not contain this key and must preserve the
+                    -- product master value.
+                    spec_remark=CASE
+                        WHEN json_extract(excluded.raw_json, '$.goods_remark') IS NOT NULL
+                        THEN excluded.spec_remark
+                        ELSE products.spec_remark
+                    END,
+                    goods_remark=CASE
+                        WHEN json_extract(excluded.raw_json, '$.goods_remark') IS NOT NULL
+                        THEN excluded.goods_remark
+                        ELSE products.goods_remark
+                    END,
                     erp_price=CASE WHEN excluded.erp_price IS NULL THEN products.erp_price ELSE excluded.erp_price END,
                     updated_at=excluded.updated_at,
                     raw_json=excluded.raw_json

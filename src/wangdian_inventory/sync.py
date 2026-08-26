@@ -106,11 +106,12 @@ class InventorySynchronizer:
                 merged["goods_name"] = merged.get("goods_name") or goods_item.get("goods_name")
                 merged["short_name"] = merged.get("short_name") or goods_item.get("short_name")
                 merged["brand_name"] = merged.get("brand_name") or goods_item.get("brand_name")
-                # WangDian keeps the report-facing classification in the SKU
-                # remark and the ERP price in spec prop1.
-                merged["spec_remark"] = str(
-                    spec.get("remark") or goods_item.get("remark") or ""
-                ).strip()
+                # WangDian exposes two different remark levels. The report's
+                # 规格备注 comes only from spec_list[].remark; goods.remark is
+                # stored separately as 货品备注 and must not fall back into the
+                # SKU/spec field when the SKU remark is empty.
+                merged["spec_remark"] = str(spec.get("remark") or "").strip()
+                merged["goods_remark"] = str(goods_item.get("remark") or "").strip()
                 if spec.get("prop1") not in (None, ""):
                     merged["erp_price"] = spec.get("prop1")
                 # WangDian exposes the planning metadata as positional props.

@@ -151,6 +151,31 @@ curl http://127.0.0.1:5052/api/status
 
 ## 5. 启动网页
 
+Linux/macOS 如果已安装 Node.js 和 npm，可以在项目根目录直接启动：
+
+```bash
+npm start
+```
+
+默认监听 `0.0.0.0:5052`。如需更换端口：
+
+```bash
+PORT=5053 npm start
+```
+
+使用 PM2 托管网页时也可以直接运行同一个入口：
+
+```bash
+pm2 start npm --name wangdian-inventory-web --cwd /home/ecs-user/wangyewangdian -- start
+pm2 save
+```
+
+以后重启：
+
+```bash
+pm2 restart wangdian-inventory-web --update-env
+```
+
 仅本机访问：
 
 ```bash

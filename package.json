@@ -1,0 +1,10 @@
+{
+  "name": "wangdian-inventory-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "旺店通库存日报网页服务启动入口",
+  "scripts": {
+    "start": "bash scripts/start-web.sh",
+    "daily-job": "bash scripts/run-daily-job.sh"
+  }
+}

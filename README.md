@@ -86,16 +86,16 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## 4. 配置旺店通凭证
 
-推荐复制本地配置模板：
+推荐使用项目根目录的配置文件。先将模板复制为 `wangdian_config.py`：
 
 ```bash
-cp examples/wangdian_config.example.py examples/wangdian_config.py
+cp wangdian_config.example.py wangdian_config.py
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item examples\wangdian_config.example.py examples\wangdian_config.py
+Copy-Item wangdian_config.example.py wangdian_config.py
 ```
 
 然后填写：
@@ -107,11 +107,19 @@ APP_SECRET = "你的接口密钥"
 ENVIRONMENT = "production"
 ```
 
-`examples/wangdian_config.py` 已被 `.gitignore` 排除，不能提交或发送给他人。在 macOS/Linux 上建议限制权限：
+`wangdian_config.py` 已被 `.gitignore` 排除，不能提交或发送给他人。在 macOS/Linux 上建议限制权限：
 
 ```bash
-chmod 600 examples/wangdian_config.py
+chmod 600 wangdian_config.py
 ```
+
+以后只需要直接编辑项目根目录的 `wangdian_config.py`，不用再到终端设置环境变量。Linux 云服务器上可以用编辑器打开：
+
+```bash
+nano /home/ecs-user/wangyewangdian/wangdian_config.py
+```
+
+保存后重启网页服务即可；定时任务也会自动读取同一个文件。环境变量仍可作为临时覆盖方式。
 
 也可以使用环境变量：
 
@@ -123,7 +131,7 @@ export WDT_ENV='production'
 export WDT_DATABASE='/absolute/path/to/data/inventory_production.db'
 ```
 
-配置读取优先级为：环境变量优先，其次是 `examples/wangdian_config.py`。
+配置读取优先级为：环境变量优先，其次是项目根目录 `wangdian_config.py`，最后兼容旧路径 `examples/wangdian_config.py`。
 
 如果没有配置凭证，系统默认进入演示模式并使用 `data/inventory_demo.db`。正式运行前请通过状态接口确认：
 

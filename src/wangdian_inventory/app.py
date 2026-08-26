@@ -316,7 +316,7 @@ class InventoryApplication:
     def sync(self, body: dict) -> tuple[dict, int]:
         if not self.settings.credentials_configured:
             return {
-                "error": "请先在 examples/wangdian_config.py 中配置旺店通凭证",
+                "error": "请先在项目根目录 wangdian_config.py 中配置旺店通凭证",
                 "demo_mode": self.settings.demo_mode,
             }, 409
         try:

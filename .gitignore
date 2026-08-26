@@ -11,4 +11,5 @@ dist/
 outputs/
 .env
 examples/wangdian_config.py
+wangdian_config.py
 data/

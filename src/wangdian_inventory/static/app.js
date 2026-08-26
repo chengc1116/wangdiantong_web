@@ -273,7 +273,7 @@ async function loadStatus() {
   $("#lastSync").textContent = last ? `最近同步 ${last.sync_date}` : "尚未同步";
   $("#syncEnvironment").textContent = `${label} · 仅刷新当前库存并保存当日快照`;
   if (state.status.demo_mode) {
-    $("#noticeBar").textContent = "当前为独立演示数据库。填写 examples/wangdian_config.py 并重启服务后将自动切换到真实数据。";
+    $("#noticeBar").textContent = "当前为独立演示数据库。填写项目根目录 wangdian_config.py 并重启服务后将自动切换到真实数据。";
     $("#noticeBar").classList.remove("hidden");
   } else if (!state.status.configured) {
     $("#noticeBar").textContent = "尚未配置旺店通接口凭证，数据同步暂不可用。";

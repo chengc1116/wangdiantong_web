@@ -1,4 +1,4 @@
-"""Application configuration loaded from environment or local example config."""
+"""Application configuration loaded from environment or a local config file."""
 
 import importlib.util
 import os
@@ -9,6 +9,13 @@ from typing import Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# The root-level file is the normal deployment location.  The old examples/
+# location remains supported so existing installations keep working.
+CONFIG_PATHS = (
+    PROJECT_ROOT / "wangdian_config.py",
+    PROJECT_ROOT / "examples" / "wangdian_config.py",
+)
 
 
 def _load_local_config(path: Path) -> Optional[ModuleType]:
@@ -37,7 +44,10 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    local = _load_local_config(PROJECT_ROOT / "examples" / "wangdian_config.py")
+    local = next(
+        (loaded for path in CONFIG_PATHS if (loaded := _load_local_config(path))),
+        None,
+    )
 
     def value(env_name: str, local_name: str, default: str = "") -> str:
         env_value = os.getenv(env_name)
@@ -57,9 +67,14 @@ def load_settings() -> Settings:
         default_name = "inventory_production.db"
     else:
         default_name = "inventory.db"
-    database_path = Path(
-        os.getenv("WDT_DATABASE", str(PROJECT_ROOT / "data" / default_name))
-    ).expanduser()
+    database_value = os.getenv("WDT_DATABASE")
+    if database_value is None:
+        database_value = str(
+            getattr(local, "DATABASE", PROJECT_ROOT / "data" / default_name)
+            if local
+            else PROJECT_ROOT / "data" / default_name
+        )
+    database_path = Path(database_value).expanduser()
     return Settings(
         sid=sid,
         app_key=app_key,

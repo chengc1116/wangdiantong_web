@@ -350,17 +350,74 @@ def _is_lead_time_shortage(projected_coverage_days: Optional[float], lead_days: 
     )
 
 
+def _purchase_category(category: Any) -> str:
+    """Map WangDian's detailed category path to the order-form category.
+
+    The order formula workbook only distinguishes wrist, knee, ankle, waist,
+    and "other".  The source category is commonly a path such as
+    ``护具/护腕``; all categories not explicitly named in the workbook belong
+    to ``其他``.
+    """
+    value = str(category or "").strip()
+    for name in ("护腕", "护膝", "护踝", "护腰"):
+        if name in value:
+            return name
+    return "其他"
+
+
+def _trend_purchase_multiplier(trend_coefficient: Optional[float]) -> float:
+    """Return the workbook's purchase multiplier for a trend coefficient."""
+    if trend_coefficient is None:
+        return 1.0
+    if trend_coefficient < 0.5:
+        return 0.5
+    if trend_coefficient < 0.8:
+        return 0.6
+    if trend_coefficient < 1.2:
+        return 1.0
+    if trend_coefficient < 1.8:
+        return 1.2
+    return 1.4
+
+
+def _target_week_multiplier(production_days: Optional[int]) -> Optional[float]:
+    """Return the workbook target quantity in multiples of weekly sales A.
+
+    The workbook expresses the target as 2A+2A, 4A+3A, or 4A+4A.  The
+    production-day bands select the corresponding target for every listed
+    structure/category combination.
+    """
+    if production_days is None:
+        return None
+    if production_days <= 20:
+        return 4.0  # 2A safety stock + 2A production stock
+    if production_days <= 25:
+        return 7.0  # 4A safety stock + 3A production stock
+    return 8.0  # 4A safety stock + 4A production stock
+
+
 class InventoryDatabase:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.initialize()
+    def __init__(self, path: Path, *, read_only: bool = False) -> None:
+        self.path = Path(path)
+        self.read_only = read_only
+        if not self.read_only:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.initialize()
+        elif not self.path.exists():
+            raise FileNotFoundError(f"SQLite database not found: {self.path}")
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
+        if self.read_only:
+            # URI mode=ro prevents the API process from creating tables,
+            # running migrations, or changing the cloud database.
+            database_uri = f"file:{self.path.resolve()}?mode=ro"
+            connection = sqlite3.connect(database_uri, uri=True, timeout=30)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
+        if not self.read_only:
+            connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
     def initialize(self) -> None:
@@ -2237,14 +2294,40 @@ class InventoryDatabase:
         limit: int = 100,
         offset: int = 0,
     ) -> Dict[str, Any]:
+        """Aggregate warehouse SKU performance by product short name.
+
+        Each row combines every SKU and every active warehouse that shares the
+        same product short name.  Warehouse-level rows are deliberately not
+        returned: this screen is the company-wide counterpart to
+        :meth:`warehouse_sku_sales`.
+        """
         product_filter = ""
-        params: List[Any] = []
+        product_params: List[Any] = []
         if search:
             product_filter = (
                 "WHERE sku_no LIKE ? OR goods_no LIKE ? OR goods_name LIKE ? "
                 "OR short_name LIKE ? OR spec_name LIKE ? OR barcode LIKE ?"
             )
-            params.extend([f"%{search}%"] * 6)
+            product_params.extend([f"%{search}%"] * 6)
+
+        end_day = date.fromisoformat(end_date)
+        sales_7_start = (end_day - timedelta(days=6)).isoformat()
+        sales_15_start = (end_day - timedelta(days=14)).isoformat()
+        sales_30_start = (end_day - timedelta(days=29)).isoformat()
+        active_sales_filter = (
+            "NOT EXISTS (SELECT 1 FROM warehouse_master wm "
+            "WHERE wm.warehouse_id=m.warehouse_id "
+            "AND (wm.is_disabled=1 OR wm.role<>'sales'))"
+        )
+        active_return_filter = (
+            "NOT EXISTS (SELECT 1 FROM warehouse_master wm "
+            "WHERE wm.warehouse_id=m.warehouse_id AND wm.is_disabled=1)"
+        )
+        active_inventory_filter = (
+            "NOT EXISTS (SELECT 1 FROM warehouse_master wm "
+            "WHERE wm.warehouse_id=i.warehouse_id "
+            "AND (wm.is_disabled=1 OR wm.role<>'sales'))"
+        )
 
         ctes = f"""
             WITH product_map AS (
@@ -2252,102 +2335,157 @@ class InventoryDatabase:
                        COALESCE(NULLIF(short_name,''), NULLIF(goods_no,''),
                                 NULLIF(goods_name,''), sku_no) display_name,
                        CASE WHEN short_name<>'' THEN 0 ELSE 1 END is_fallback,
-                       goods_name, goods_no
+                       goods_name
                 FROM products
                 {product_filter}
             ), movement_summary AS (
                 SELECT pm.display_name, MIN(pm.is_fallback) is_fallback,
-                       COUNT(DISTINCT m.sku_no) movement_sku_count,
                        SUM(CASE WHEN m.movement_type IN (-1,-6) THEN m.out_num ELSE 0 END) sales_qty,
                        SUM(CASE WHEN m.movement_type=3 THEN m.in_num ELSE 0 END) return_qty
                 FROM movements m
                 JOIN product_map pm ON pm.sku_no=m.sku_no
                 WHERE m.movement_date BETWEEN ? AND ?
-                  AND m.movement_type IN (-1,-6,3)
-                  AND m.warehouse_id IN (SELECT warehouse_id FROM warehouse_master WHERE is_disabled=0 AND role='sales')
+                  AND ((m.movement_type IN (-1,-6) AND {active_sales_filter})
+                       OR (m.movement_type=3 AND {active_return_filter}))
+                GROUP BY pm.display_name
+            ), rolling_sales AS (
+                SELECT pm.display_name,
+                       SUM(CASE WHEN m.movement_date BETWEEN ? AND ? THEN m.out_num ELSE 0 END) sales_7d_qty,
+                       SUM(CASE WHEN m.movement_date BETWEEN ? AND ? THEN m.out_num ELSE 0 END) sales_15d_qty,
+                       SUM(m.out_num) sales_30d_qty
+                FROM movements m
+                JOIN product_map pm ON pm.sku_no=m.sku_no
+                WHERE m.movement_date BETWEEN ? AND ?
+                  AND m.movement_type IN (-1,-6)
+                  AND {active_sales_filter}
                 GROUP BY pm.display_name
             ), inventory_summary AS (
-                SELECT pm.display_name, COUNT(DISTINCT i.sku_no) sku_count,
-                       SUM(i.stock_num) stock_num, SUM(i.available_num) available_num,
-                       GROUP_CONCAT(DISTINCT NULLIF(pm.goods_name,'')) goods_names
+                SELECT pm.display_name,
+                       SUM(i.stock_num) stock_num,
+                       SUM(i.available_num) available_num,
+                       SUM(i.purchase_in_transit_num) purchase_in_transit_num
                 FROM inventory_current i
                 JOIN product_map pm ON pm.sku_no=i.sku_no
-                JOIN warehouse_master wm ON wm.warehouse_id=i.warehouse_id
-                WHERE wm.is_disabled=0 AND wm.role='sales'
+                WHERE {active_inventory_filter}
                 GROUP BY pm.display_name
+            ), short_skus AS (
+                SELECT DISTINCT pm.display_name, pm.sku_no
+                FROM movements m
+                JOIN product_map pm ON pm.sku_no=m.sku_no
+                WHERE m.movement_date BETWEEN ? AND ?
+                  AND ((m.movement_type IN (-1,-6) AND {active_sales_filter})
+                       OR (m.movement_type=3 AND {active_return_filter}))
+                UNION
+                SELECT DISTINCT pm.display_name, pm.sku_no
+                FROM inventory_current i
+                JOIN product_map pm ON pm.sku_no=i.sku_no
+                WHERE {active_inventory_filter}
+            ), sku_summary AS (
+                SELECT ss.display_name, MIN(pm.is_fallback) is_fallback,
+                       COUNT(*) sku_count,
+                       GROUP_CONCAT(DISTINCT NULLIF(pm.goods_name,'')) goods_names
+                FROM short_skus ss
+                JOIN product_map pm ON pm.sku_no=ss.sku_no
+                GROUP BY ss.display_name
+            ), name_universe AS (
+                SELECT display_name FROM movement_summary
+                UNION
+                SELECT display_name FROM inventory_summary
             ), combined AS (
-                SELECT ms.display_name, ms.is_fallback,
-                       COALESCE(inv.sku_count,ms.movement_sku_count) sku_count,
-                       COALESCE(inv.goods_names,'') goods_names,
-                       ms.sales_qty, ms.return_qty,
-                       ms.sales_qty-ms.return_qty net_sales_qty,
+                SELECT u.display_name,
+                       COALESCE(ms.is_fallback, ss.is_fallback, 0) is_fallback,
+                       COALESCE(ss.sku_count,0) sku_count,
+                       COALESCE(ss.goods_names,'') goods_names,
+                       COALESCE(ms.sales_qty,0) sales_qty,
+                       COALESCE(ms.return_qty,0) return_qty,
+                       COALESCE(ms.sales_qty,0)-COALESCE(ms.return_qty,0) net_sales_qty,
+                       COALESCE(rs.sales_7d_qty,0) sales_7d_qty,
+                       COALESCE(rs.sales_15d_qty,0) sales_15d_qty,
+                       COALESCE(rs.sales_30d_qty,0) sales_30d_qty,
                        COALESCE(inv.stock_num,0) stock_num,
-                       COALESCE(inv.available_num,0) available_num
-                FROM movement_summary ms
-                LEFT JOIN inventory_summary inv ON inv.display_name=ms.display_name
+                       COALESCE(inv.available_num,0) available_num,
+                       COALESCE(inv.purchase_in_transit_num,0) purchase_in_transit_num
+                FROM name_universe u
+                LEFT JOIN movement_summary ms ON ms.display_name=u.display_name
+                LEFT JOIN rolling_sales rs ON rs.display_name=u.display_name
+                LEFT JOIN inventory_summary inv ON inv.display_name=u.display_name
+                LEFT JOIN sku_summary ss ON ss.display_name=u.display_name
             )
         """
-        base_params = params + [start_date, end_date]
+        cte_params = product_params + [
+            start_date, end_date,
+            sales_7_start, end_date,
+            sales_15_start, end_date,
+            sales_30_start, end_date,
+            start_date, end_date,
+        ]
         with self.connect() as connection:
             summary = connection.execute(
                 ctes + """
                 SELECT COUNT(*) row_count, COALESCE(SUM(sku_count),0) sku_count,
                        COALESCE(SUM(sales_qty),0) sales_qty,
                        COALESCE(SUM(return_qty),0) return_qty,
-                       COALESCE(SUM(net_sales_qty),0) net_sales_qty
+                       COALESCE(SUM(net_sales_qty),0) net_sales_qty,
+                       COALESCE(SUM(sales_7d_qty),0) sales_7d_qty,
+                       COALESCE(SUM(sales_15d_qty),0) sales_15d_qty,
+                       COALESCE(SUM(sales_30d_qty),0) sales_30d_qty
                 FROM combined
                 """,
-                base_params,
+                cte_params,
             ).fetchone()
             rows = connection.execute(
                 ctes + """
                 SELECT * FROM combined
-                ORDER BY sales_qty DESC, display_name
+                ORDER BY net_sales_qty DESC, sales_qty DESC, display_name
                 LIMIT ? OFFSET ?
                 """,
-                base_params + [limit, offset],
+                cte_params + [limit, offset],
             ).fetchall()
 
-            names = [row["display_name"] for row in rows]
-            warehouse_map: Dict[str, List[Dict[str, Any]]] = {name: [] for name in names}
-            if names:
-                placeholders = ",".join("?" for _ in names)
-                warehouse_rows = connection.execute(
-                    f"""
-                    WITH product_map AS (
-                        SELECT sku_no,
-                               COALESCE(NULLIF(short_name,''), NULLIF(goods_no,''),
-                                        NULLIF(goods_name,''), sku_no) display_name
-                        FROM products
-                    )
-                    SELECT pm.display_name, m.warehouse_id,
-                           MAX(m.warehouse_name) warehouse_name,
-                           SUM(m.out_num) sales_qty
-                    FROM movements m
-                    JOIN product_map pm ON pm.sku_no=m.sku_no
-                    WHERE m.movement_date BETWEEN ? AND ?
-                      AND m.movement_type IN (-1,-6)
-                      AND m.warehouse_id IN (SELECT warehouse_id FROM warehouse_master WHERE is_disabled=0 AND role='sales')
-                      AND pm.display_name IN ({placeholders})
-                    GROUP BY pm.display_name, m.warehouse_id
-                    HAVING SUM(m.out_num)<>0
-                    ORDER BY pm.display_name, sales_qty DESC
-                    """,
-                    [start_date, end_date] + names,
-                ).fetchall()
-                for row in warehouse_rows:
-                    item = dict(row)
-                    warehouse_map[item.pop("display_name")].append(item)
-
-        items = []
+        range_days = max((date.fromisoformat(end_date) - date.fromisoformat(start_date)).days + 1, 1)
+        result_rows = []
         for row in rows:
             item = dict(row)
-            item["warehouses"] = warehouse_map.get(item["display_name"], [])
-            items.append(item)
+            sales_7 = to_float(item.get("sales_7d_qty"))
+            sales_30 = to_float(item.get("sales_30d_qty"))
+            if sales_30 > 0:
+                daily_sales = sales_30 / 30
+                trend_coefficient = (sales_7 / 7) / daily_sales
+            elif sales_7 > 0:
+                daily_sales = sales_7 / 7
+                trend_coefficient = None
+            elif to_float(item.get("sales_qty")) > 0:
+                daily_sales = to_float(item.get("sales_qty")) / range_days
+                trend_coefficient = None
+            else:
+                daily_sales = 0.0
+                trend_coefficient = None
+            supply = to_float(item.get("available_num")) + to_float(item.get("purchase_in_transit_num"))
+            remaining_days = supply / daily_sales if daily_sales > 0 else None
+            stockout_date = None
+            if remaining_days is not None:
+                try:
+                    stockout_date = (
+                        end_day + timedelta(days=max(math.ceil(remaining_days) - 1, 0))
+                    ).isoformat()
+                except OverflowError:
+                    stockout_date = None
+            item["trend_coefficient"] = round(trend_coefficient, 3) if trend_coefficient is not None else None
+            item["inventory_with_transit_days"] = (
+                int(math.floor(remaining_days + 0.5)) if remaining_days is not None else None
+            )
+            item["estimated_stockout_date_with_transit"] = stockout_date
+            item["coverage_daily_sales"] = round(daily_sales, 3)
+            result_rows.append(item)
         return {
             "summary": dict(summary) if summary else {},
-            "items": items,
+            "items": result_rows,
             "range": {"start": start_date, "end": end_date},
+            "rolling_ranges": {
+                "sales_7d": {"start": sales_7_start, "end": end_date},
+                "sales_15d": {"start": sales_15_start, "end": end_date},
+                "sales_30d": {"start": sales_30_start, "end": end_date},
+            },
             "pagination": {
                 "total": int(summary["row_count"] if summary else 0),
                 "limit": limit,
@@ -2499,7 +2637,7 @@ class InventoryDatabase:
                 {warehouse_filter}
             ), model AS (
                 SELECT facts.*,h.sales_history_days,
-                       CASE WHEN h.sales_history_days>=30 THEN avg_7d_daily*0.6 + avg_30d_daily*0.4
+                       CASE WHEN h.sales_history_days>=30 THEN avg_7d_daily*0.4 + avg_30d_daily*0.6
                             WHEN h.sales_history_days>=7 THEN avg_7d_daily
                             WHEN h.sales_history_days>=3 THEN avg_3d_daily
                             WHEN h.sales_history_days>0 THEN sales_3d_qty*1.0/h.sales_history_days
@@ -2640,28 +2778,21 @@ class InventoryDatabase:
                 SELECT *,
                        CASE
                          WHEN trend_coefficient IS NULL THEN 1.0
-                         WHEN trend_coefficient < 0.5 THEN 0.30
-                         WHEN trend_coefficient < 0.8 THEN 0.70
+                         WHEN trend_coefficient < 0.5 THEN 0.50
+                         WHEN trend_coefficient < 0.8 THEN 0.60
                          WHEN trend_coefficient < 1.2 THEN 1.00
-                         WHEN trend_coefficient < 1.8 THEN 1.35
-                         ELSE 1.75
+                         WHEN trend_coefficient < 1.8 THEN 1.20
+                         ELSE 1.40
                        END trend_adjustment,
-                       forecast_daily_sales * CASE
-                         WHEN trend_coefficient IS NULL THEN 1.0
-                         WHEN trend_coefficient < 0.5 THEN 0.30
-                         WHEN trend_coefficient < 0.8 THEN 0.70
-                         WHEN trend_coefficient < 1.2 THEN 1.00
-                         WHEN trend_coefficient < 1.8 THEN 1.35
-                         ELSE 1.75
-                       END trend_adjusted_daily_sales,
+                       forecast_daily_sales trend_adjusted_daily_sales,
                        CASE WHEN product_structure='清仓款' THEN 0
                             ELSE MAX(0,forecast_daily_sales * CASE
                               WHEN trend_coefficient IS NULL THEN 1.0
-                              WHEN trend_coefficient < 0.5 THEN 0.30
-                              WHEN trend_coefficient < 0.8 THEN 0.70
+                              WHEN trend_coefficient < 0.5 THEN 0.50
+                              WHEN trend_coefficient < 0.8 THEN 0.60
                               WHEN trend_coefficient < 1.2 THEN 1.00
-                              WHEN trend_coefficient < 1.8 THEN 1.35
-                              ELSE 1.75
+                              WHEN trend_coefficient < 1.8 THEN 1.20
+                              ELSE 1.40
                             END *?-available_num-purchase_in_transit_num)
                        END suggested_restock,
                        CASE
@@ -2783,7 +2914,11 @@ class InventoryDatabase:
                 if trend_max is not None and coefficient >= trend_max:
                     continue
             row = dict(item)
-            remaining = max(0.0, float(row["required_qty"]) - float(row["supply_qty"]) - float(row["transfer_qty"]))
+            # Purchase quantity follows the workbook target directly. Current
+            # stock, purchase in-transit and suggested transfers affect stock
+            # coverage, shortage severity and order timing only; they no longer
+            # reduce the quantity to order.
+            remaining = max(0.0, float(row["required_qty"]))
             # A blank MOQ defaults to 100 units. An explicitly configured
             # metadata row with "无" remains the zero-MOQ exception.
             if row.get("moq") in (None, "") and row.get("metadata_status") != "已配置":
@@ -2812,7 +2947,6 @@ class InventoryDatabase:
                 and row.get("trend_coefficient") is not None
                 and row["trend_coefficient"] < 0.5
                 and row.get("daily_sales", 0) < 1
-                and final_qty > 0
             )
             if row["production_days"] is None:
                 status = "参数待补充"
@@ -2921,7 +3055,11 @@ class InventoryDatabase:
                 "planned_count": sum(1 for row in rows if row.get("plan_status") == "计划下单"),
                 "pending_count": sum(1 for row in rows if row.get("plan_status") == "参数待补充"),
                 "risk_count": sum(1 for row in rows if row.get("plan_status") == "交期内预计缺货"),
-                "severe_shortage_count": sum(1 for row in rows if row["is_severe_shortage"]),
+                # Keep the summary aligned with the red urgent rows in the
+                # purchase-plan table. Low-demand/clearance observations may
+                # still have a shortage flag at the raw coverage level, but
+                # they are intentionally not treated as urgent purchase rows.
+                "severe_shortage_count": sum(1 for row in rows if row.get("procurement_severity") == "urgent"),
                 "due_within_week_count": sum(1 for row in rows if row["is_due_within_week"]),
                 "future_purchase_count": sum(1 for row in rows if row["is_purchase_action"] and not row["is_severe_shortage"] and not row["is_due_within_week"]),
                 "low_demand_count": sum(1 for row in rows if row.get("low_demand_observation")),
@@ -2933,7 +3071,7 @@ class InventoryDatabase:
             },
             "range": {"start": start_date, "end": end_date, "days": (end - date.fromisoformat(start_date)).days + 1},
             "target_days": target_days,
-            "planning_basis": "仅计算五个运营仓；先按预计缺货日减完整交付周期倒推理论下单日，再按日期分级。含在途库存天数严格小于完整交付周期时标为紧急；宏博/博凯基础款的每月5日、15日作为执行参考，不用于放大紧急等级；缺生产周期仅展示不计算。",
+            "planning_basis": "仅计算五个运营仓；日销量按7日均值40%+30日均值60%计算，采购量按周销量A匹配生产周期公式并应用趋势倍率，直接使用目标库存，不扣减可用库存、采购在途或建议调拨。先按预计缺货日减完整交付周期倒推理论下单日，再按日期分级。含在途库存天数严格小于完整交付周期时标为紧急；宏博/铠博/博凯基础款的每月5日、20日作为执行参考，不用于放大紧急等级；缺生产周期仅展示不计算。",
             "trend_filter": {"min": trend_min, "max": trend_max},
             "snapshot_date": self._latest_snapshot_date(),
             "pagination": {"total": total, "limit": limit, "offset": offset},
@@ -2970,10 +3108,18 @@ class InventoryDatabase:
         if row["buffer_days"]:
             base += " + 物流/预留5天"
         if row.get("fixed_order_date"):
-            base += "；理论下单日按库存倒推，5日/15日仅作执行参考"
-        if row["transfer_qty"]:
-            return f"先从其他仓调拨 {int(row['transfer_qty'])} 件；{base}，剩余直发采购缺口 {math.ceil(remaining)} 件。"
-        return f"{base}，按目标仓从下单到到货期间的缺口直发采购。"
+            base += "；理论下单日按库存倒推，5日/20日仅作执行参考"
+        quantity_basis = (
+            f"周销量A={float(row.get('weekly_sales') or 0):g}，"
+            f"目标{float(row.get('target_week_multiplier') or 0):g}A，"
+            f"趋势倍率{float(row.get('trend_purchase_multiplier') or 1):g}，"
+            f"目标库存{float(row.get('target_stock_qty') or 0):g}件；"
+        )
+        transfer_note = f"；另建议跨仓调拨 {int(row['transfer_qty'])} 件" if row["transfer_qty"] else ""
+        return (
+            f"{quantity_basis}{base}；采购量直接按目标库存计算，不扣减可用库存、"
+            f"采购在途或建议调拨，取整前为 {math.ceil(remaining)} 件{transfer_note}。"
+        )
 
     def _warehouse_planning_rows(self, start_date: str, end_date: str, *, search: str = "") -> Dict[str, Any]:
         """Build warehouse/SKU demand facts and reserve source stock before transfer allocation."""
@@ -3063,7 +3209,7 @@ class InventoryDatabase:
             for offset in (-1, 0, 1, 2):
                 month = anchor.month - 1 + offset
                 year, month = anchor.year + month // 12, month % 12 + 1
-                candidates.extend((date(year, month, 5), date(year, month, 15)))
+                candidates.extend((date(year, month, 5), date(year, month, 20)))
             return min(value for value in candidates if value >= anchor)
 
         def fixed_before(deadline: date) -> date:
@@ -3071,16 +3217,24 @@ class InventoryDatabase:
             for offset in (-2, -1, 0, 1, 2):
                 month = deadline.month - 1 + offset
                 year, month = deadline.year + month // 12, month % 12 + 1
-                candidates.extend((date(year, month, 5), date(year, month, 15)))
+                candidates.extend((date(year, month, 5), date(year, month, 20)))
             eligible = [value for value in candidates if end <= value <= deadline]
             return max(eligible) if eligible else next_fixed(end)
+
+        def next_thursday(anchor: date) -> date:
+            days = (3 - anchor.weekday()) % 7
+            return anchor + timedelta(days=days)
+
+        def fixed_supplier(name: str) -> bool:
+            # Keep compatibility with both names encountered in WangDian data.
+            return any(token in name for token in ("宏博", "铠博", "博凯"))
 
         rows: List[Dict[str, Any]] = []
         for raw in db_rows:
             row = dict(raw)
             avg3, avg7, avg30 = row["sales_3d_qty"] / 3, row["sales_7d_qty"] / 7, row["sales_30d_qty"] / 30
             if history_days >= 30:
-                forecast, basis = avg7 * .6 + avg30 * .4, "7日/30日加权"
+                forecast, basis = avg7 * .4 + avg30 * .6, "7日/30日加权（40%/60%）"
             elif history_days >= 7:
                 forecast, basis = avg7, "7日平均"
             elif history_days >= 3:
@@ -3090,46 +3244,78 @@ class InventoryDatabase:
             else:
                 forecast, basis = 0.0, "暂无销量"
             coefficient = avg7 / avg30 if row["sales_30d_qty"] else None
-            adjustment = 1.0 if coefficient is None else (.30 if coefficient < .5 else .70 if coefficient < .8 else 1.0 if coefficient < 1.2 else 1.35 if coefficient < 1.8 else 1.75)
+            adjustment = _trend_purchase_multiplier(coefficient)
             trend_status = "无30日基线" if coefficient is None else "大幅下滑" if coefficient < .5 else "小幅下滑" if coefficient < .8 else "平稳" if coefficient < 1.2 else "稳步上涨" if coefficient < 1.8 else "爆发增长"
-            daily = forecast * adjustment
+            # The workbook applies the trend multiplier to the purchase target,
+            # not to daily sales.  Keeping daily sales independent avoids
+            # counting the same trend twice when calculating coverage days.
+            daily = forecast
             supplier_name = str(row["supplier_name"] or "")
-            hongbo_or_bokai = any(token in supplier_name for token in ("宏博", "博凯"))
+            hongbo_or_bokai = fixed_supplier(supplier_name)
             production = int(row["production_days"]) if row["production_days"] not in (None, "") else (30 if hongbo_or_bokai else None)
             fixed = hongbo_or_bokai and row["product_structure"] == "基础款"
             advance = {15: 2, 25: 3, 30: 5}.get(production, max(1, round(production / 6))) if production else None
             buffer = 5 if fixed else 0
             lead = production + advance + buffer if production and advance else None
+            purchase_category = _purchase_category(row.get("category"))
+            target_week_multiplier = _target_week_multiplier(production)
+            weekly_sales = float(row["sales_7d_qty"] or 0)
+            target_stock_qty = (
+                weekly_sales * target_week_multiplier * adjustment
+                if target_week_multiplier is not None else 0.0
+            )
             supply = float(row["available_num"] or 0) + float(row["purchase_in_transit_num"] or 0)
             if lead and daily > 0:
                 projected_coverage = supply / daily
                 stockout = end + timedelta(days=max(0, math.ceil(projected_coverage) - 1)) if supply > 0 else end
                 due = stockout - timedelta(days=lead)
-                # First establish the inventory-driven theoretical schedule.
-                # Fixed supplier dates are an execution convention, not an
-                # urgency test: a 50-day supply against a 40-day lead time must
-                # remain a future plan even if the next 5th/15th falls later.
+                # Establish the inventory-driven theoretical schedule first.
                 order = max(end, due)
                 arrival = order + timedelta(days=lead)
                 arrival_days = lead + max((order - end).days, 0)
                 next_arrival = None
                 horizon = arrival_days
                 shortage_before_arrival = _is_lead_time_shortage(projected_coverage, lead)
-                # Only a genuine lead-time shortage bypasses all scheduling
-                # conventions and becomes an urgent order today.
                 if shortage_before_arrival:
                     order = end
                     arrival = order + timedelta(days=lead)
                     arrival_days = lead
-                if fixed and not shortage_before_arrival:
-                    next_arrival = next_fixed(order + timedelta(days=1)) + timedelta(days=lead)
-                    horizon = max(horizon, (next_arrival - end).days)
-                required = daily * horizon
+                elif fixed:
+                    # Fixed-date products use the latest fixed date that still
+                    # meets the inventory-driven due date; if the due date is
+                    # already past, use the next available fixed date.
+                    order = fixed_before(due)
+                    arrival = order + timedelta(days=lead)
+                    next_arrival = arrival
+                    horizon = max((arrival - end).days, 0)
+                elif row["product_structure"] == "基础款":
+                    # Non-fixed basic products are ordered every Thursday.
+                    order = next_thursday(max(end, due))
+                    arrival = order + timedelta(days=lead)
+                    next_arrival = arrival
+                    horizon = max((arrival - end).days, 0)
+                else:
+                    # Amplified/test products use the workbook's inventory-day
+                    # trigger. The trigger is a normal schedule rule; a value
+                    # below full lead time remains the separate urgent rule.
+                    trigger_days = 20 if production <= 20 else 30 if production <= 25 else 35
+                    if projected_coverage < trigger_days:
+                        order = end
+                        arrival = order + timedelta(days=lead)
+                        horizon = lead
+                    else:
+                        order = max(end, due)
+                        arrival = order + timedelta(days=lead)
+                        horizon = max((arrival - end).days, 0)
+                # The workbook quantity is target stock, not demand during the
+                # planning horizon. Keep required_qty as that target so the
+                # purchase calculation subtracts stock and in-transit directly.
+                required = target_stock_qty
             else:
                 stockout = due = order = arrival = next_arrival = None
                 horizon = 0
                 shortage_before_arrival = False
-                required = 0
+                required = target_stock_qty
             is_clearance = row["product_structure"] == "清仓款"
             coverage = (float(row["available_num"] or 0) / daily) if daily else None
             projected_coverage = (
@@ -3141,9 +3327,13 @@ class InventoryDatabase:
                 "avg_3d_daily": round(avg3, 3), "avg_7d_daily": round(avg7, 3), "avg_30d_daily": round(avg30, 3),
                 "forecast_daily_sales": round(forecast, 3), "forecast_basis": basis,
                 "trend_coefficient": round(coefficient, 3) if coefficient is not None else None,
-                "trend_status": trend_status, "trend_adjustment": adjustment, "trend_adjusted_daily_sales": round(daily, 3), "daily_sales": daily,
+                "trend_status": trend_status, "trend_adjustment": adjustment, "trend_purchase_multiplier": adjustment,
+                "trend_adjusted_daily_sales": round(daily, 3), "daily_sales": daily,
+                "purchase_category": purchase_category, "weekly_sales": weekly_sales,
+                "target_week_multiplier": target_week_multiplier, "target_stock_qty": round(target_stock_qty, 3),
+                "purchase_formula": f"{int(target_week_multiplier)}A×{adjustment:g}" if target_week_multiplier is not None else "缺少生产周期",
                 "production_days": production, "advance_days": advance, "buffer_days": buffer, "lead_days": lead,
-                "order_window": "固定下单日（每月5日、15日）" if fixed else "可随时下单",
+                "order_window": "固定下单日（每月5日、20日）" if fixed else ("每周四下单" if row["product_structure"] == "基础款" else "库存天数阈值触发"),
                 "suggested_order_date": order.isoformat() if order else None, "theoretical_order_date": due.isoformat() if due else None,
                 "fixed_order_date_reference": next_fixed(order).isoformat() if fixed and order else None,
                 "estimated_arrival_date": arrival.isoformat() if arrival else None,

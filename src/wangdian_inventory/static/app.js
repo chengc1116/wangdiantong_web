@@ -610,19 +610,20 @@ function renderShortNameSales() {
   const pages = Math.max(Math.ceil(total / state.shortPageSize), 1);
   const first = total ? (state.shortPage - 1) * state.shortPageSize + 1 : 0;
   const last = Math.min(state.shortPage * state.shortPageSize, total);
-  $("#shortResultCount").textContent = `共 ${formatNumber(total)} 个简称 · 当前 ${formatNumber(first)}-${formatNumber(last)}`;
+  $("#shortResultCount").textContent = `共 ${formatNumber(total)} 个商品简称 · 当前 ${formatNumber(first)}-${formatNumber(last)}`;
   $("#shortPageInfo").textContent = `第 ${state.shortPage} / ${pages} 页`;
   $("#shortPreviousPage").disabled = state.shortPage <= 1;
   $("#shortNextPage").disabled = state.shortPage >= pages;
   $("#shortSalesQty").textContent = formatNumber(data.summary.sales_qty);
+  $("#short7dQty").textContent = formatNumber(data.summary.sales_7d_qty);
+  $("#short15dQty").textContent = formatNumber(data.summary.sales_15d_qty);
+  $("#short30dQty").textContent = formatNumber(data.summary.sales_30d_qty);
   $("#shortReturnQty").textContent = formatNumber(data.summary.return_qty);
   $("#shortNetQty").textContent = formatNumber(data.summary.net_sales_qty);
   $("#shortNameCount").textContent = formatNumber(total);
   $("#shortEmptyState").classList.toggle("hidden", items.length > 0);
   $("#shortNamesBody").innerHTML = items.map((item) => {
-    const warehouseText = item.warehouses.length
-      ? item.warehouses.map((warehouse) => `<span><strong>${escapeHtml(warehouse.warehouse_name || `仓库 ${warehouse.warehouse_id}`)}</strong> ${formatNumber(warehouse.sales_qty)}</span>`).join("")
-      : '<span class="muted">无发货</span>';
+    const coverage = item.inventory_with_transit_days == null ? "--" : `${formatNumber(item.inventory_with_transit_days)} 天`;
     return `<tr>
       <td class="short-name-cell"><strong>${escapeHtml(item.display_name)}</strong>${item.is_fallback ? '<span>简称待补</span>' : ''}</td>
       <td class="product-list-cell">${escapeHtml(item.goods_names || "未命名货品")}</td>
@@ -630,8 +631,15 @@ function renderShortNameSales() {
       <td class="numeric net-value">${formatNumber(item.sales_qty)}</td>
       <td class="numeric return-value">${item.return_qty ? formatNumber(item.return_qty) : "-"}</td>
       <td class="numeric"><strong>${formatNumber(item.net_sales_qty)}</strong></td>
+      <td class="numeric">${formatNumber(item.sales_7d_qty)}</td>
+      <td class="numeric">${formatNumber(item.sales_15d_qty)}</td>
+      <td class="numeric">${formatNumber(item.sales_30d_qty)}</td>
       <td class="numeric">${formatNumber(item.stock_num)}</td>
-      <td><div class="warehouse-breakdown">${warehouseText}</div></td>
+      <td class="numeric">${formatNumber(item.available_num)}</td>
+      <td class="numeric">${formatNumber(item.purchase_in_transit_num)}</td>
+      <td class="numeric">${item.trend_coefficient == null ? "--" : formatNumber(item.trend_coefficient)}</td>
+      <td class="numeric">${coverage}</td>
+      <td>${escapeHtml(item.estimated_stockout_date_with_transit || "--")}</td>
     </tr>`;
   }).join("");
 }
@@ -1131,7 +1139,7 @@ function bindEvents() {
       inbound: ["入库分析", "按仓库与入库类型分析近期入库流水"],
       sales: ["仓库销量与退货", "按发货仓查看 SKU 销售与退货"],
       shopSales: ["分店铺统计", "按店铺查看每个 SKU 的发货、退货与净销量"],
-      shortNames: ["简称汇总", "按商品简称汇总销量与仓库分布"],
+      shortNames: ["商品简称汇总", "按商品简称汇总所有仓库的销量与退货"],
       replenishment: ["库存预警", "非清仓款提示含在途库存超过 90 天的积压；清仓款只提示即将清完的库存"],
       purchasePlan: ["采购计划", "按目标仓先调拨后直采；清仓款不参与采购"],
       transferPlan: ["调拨建议", "按 SKU 与仓库安全库存余量生成仓间调拨建议"],

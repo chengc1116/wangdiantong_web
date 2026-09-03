@@ -342,7 +342,7 @@ class InventoryDatabaseTests(unittest.TestCase):
         self.assertEqual(return_row["return_qty"], 4)
         self.assertEqual(return_row["net_sales_qty"], -4)
 
-    def test_short_name_sales_aggregates_skus_and_warehouse_breakdown(self) -> None:
+    def test_short_name_sales_aggregates_all_warehouses_without_warehouse_rows(self) -> None:
         self.database.upsert_products(
             [
                 {
@@ -353,15 +353,56 @@ class InventoryDatabaseTests(unittest.TestCase):
                 }
             ]
         )
+        self.database.upsert_warehouses(
+            [
+                {"warehouse_id": "2", "warehouse_no": "BRANCH", "name": "分仓", "is_disabled": 0},
+                {"warehouse_id": "3", "warehouse_no": "RETURN", "name": "退货仓", "is_disabled": 0},
+            ]
+        )
+        self.database.upsert_inventory(
+            [
+                {
+                    "spec_no": "SKU-2",
+                    "warehouse_id": "2",
+                    "warehouse_name": "分仓",
+                    "stock_num": 5,
+                    "available_num": 4,
+                    "purchase_in_transit_num": 3,
+                }
+            ],
+            "2026-07-30",
+        )
+        self.database.upsert_movements(
+            [
+                {
+                    "sku_no": "SKU-2", "warehouse_id": "2", "warehouse_name": "分仓",
+                    "in_out_type": "销售订单", "out_num": 3,
+                    "create_date": "2026-07-29 16:00:00", "src_detail_id": "out-3", "src_order_no": "JY3",
+                },
+                {
+                    "sku_no": "SKU-1", "warehouse_id": "3", "warehouse_name": "退货仓",
+                    "in_out_type": "退货入库", "in_num": 1,
+                    "create_date": "2026-07-29 17:00:00", "src_detail_id": "return-3", "src_order_no": "RK3",
+                },
+            ]
+        )
+
         result = self.database.short_name_sales("2026-07-29", "2026-07-29")
         grouped = next(item for item in result["items"] if item["display_name"] == "水杯A")
         self.assertEqual(result["pagination"]["total"], 1)
         self.assertEqual(grouped["sku_count"], 2)
-        self.assertEqual(grouped["sales_qty"], 12)
-        self.assertEqual(grouped["return_qty"], 2)
-        self.assertEqual(grouped["net_sales_qty"], 10)
-        self.assertEqual(grouped["stock_num"], 30)
-        self.assertEqual(grouped["warehouses"][0]["sales_qty"], 12)
+        self.assertEqual(grouped["sales_qty"], 15)
+        self.assertEqual(grouped["return_qty"], 3)
+        self.assertEqual(grouped["net_sales_qty"], 12)
+        self.assertEqual(grouped["sales_7d_qty"], 15)
+        self.assertEqual(grouped["sales_15d_qty"], 15)
+        self.assertEqual(grouped["sales_30d_qty"], 15)
+        self.assertEqual(grouped["stock_num"], 35)
+        self.assertEqual(grouped["available_num"], 32)
+        self.assertEqual(grouped["purchase_in_transit_num"], 3)
+        self.assertNotIn("warehouses", grouped)
+        self.assertIn("inventory_with_transit_days", grouped)
+        self.assertIn("estimated_stockout_date_with_transit", grouped)
 
     def test_short_name_sales_marks_goods_number_fallback(self) -> None:
         self.database.upsert_products(
@@ -755,7 +796,7 @@ class InventoryDatabaseTests(unittest.TestCase):
         item = next(row for row in plan["items"] if row["sku_no"] == "SKU-1")
         self.assertEqual(item["production_days"], 30)
         self.assertEqual(item["moq"], 100)
-        self.assertEqual(item["order_window"], "固定下单日（每月5日、15日）")
+        self.assertEqual(item["order_window"], "固定下单日（每月5日、20日）")
         self.assertEqual(item["lead_days"], 40)
 
     def test_purchase_quantity_rounding_uses_ten_unit_cutoff(self) -> None:

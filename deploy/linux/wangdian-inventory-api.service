@@ -1,0 +1,23 @@
+[Unit]
+Description=WangDian read-only SQLite FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ecs-user
+Group=ecs-user
+WorkingDirectory=/home/ecs-user/wangdiantong_web
+Environment=PYTHONPATH=/home/ecs-user/wangdiantong_web/src
+Environment=WDT_DATABASE=/home/ecs-user/wangdiantong_web/data/inventory_production.db
+Environment=WDT_DEMO_DATA=0
+Environment=WDT_ENV=production
+Environment=WDT_API_HOST=127.0.0.1
+Environment=WDT_API_PORT=8000
+Environment=WDT_API_CORS_ORIGINS=*
+ExecStart=/home/ecs-user/wangdiantong_web/.venv/bin/uvicorn wangdian_inventory.api:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

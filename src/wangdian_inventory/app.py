@@ -398,7 +398,7 @@ class InventoryHandler(BaseHTTPRequestHandler):
             html = (self.static_root / "templates" / "index.html").read_text(encoding="utf-8")
             # Bump the asset query string when the page contract changes so an
             # already-open dashboard cannot keep rendering an older bundle.
-            html = html.replace("{{ url_for('static', filename='app.css') }}", "/static/app.css?v=20260824").replace("{{ url_for('static', filename='app.js') }}", "/static/app.js?v=20260824")
+            html = html.replace("{{ url_for('static', filename='app.css') }}", "/static/app.css?v=20260903").replace("{{ url_for('static', filename='app.js') }}", "/static/app.js?v=20260903")
             self.send_payload(html.encode("utf-8"), "text/html; charset=utf-8")
             return
         if path.startswith("/static/"):

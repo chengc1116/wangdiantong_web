@@ -210,11 +210,40 @@ $env:PYTHONPATH = "$PWD\src"
 .\.venv\Scripts\python.exe -m wangdian_inventory.app --lan --port 5052 --no-browser
 ```
 
-## 6. 同步命令
+## 6. 只读 FastAPI 数据服务
+
+项目现在提供一个面向业务人员和二开程序的 SQLite 只读 API。云服务器原有每日同步任务继续更新数据库，API 只读取同一个文件，不执行同步、不修改表结构。
+
+安装依赖：
+
+```bash
+.venv/bin/python -m pip install -e .
+```
+
+本机启动：
+
+```bash
+WDT_DATABASE=/absolute/path/to/data/inventory_production.db \
+WDT_DEMO_DATA=0 \
+PYTHONPATH=src \
+.venv/bin/python -m wangdian_inventory.api
+```
+
+主查询接口为 `POST /api/v1/query`，支持按数据集、字段、条件、分组、聚合和分页读取数据。启动后可打开：
+
+- `http://127.0.0.1:8000/docs`：Swagger 在线文档
+- `http://127.0.0.1:8000/redoc`：ReDoc 文档
+- `http://127.0.0.1:8000/api/v1/datasets`：数据集和字段清单
+
+云端部署、请求 JSON、字段列表、Nginx/systemd 配置和公网安全注意事项见 [数据库只读 FastAPI 服务说明](docs/数据库只读%20FastAPI%20服务说明.md)。
+
+公网发布前请确认商品、库存、销售、供应商、价格及订单相关字段都允许公开。当前按需求不设置登录，任何能访问公网地址的人都可以读取公开数据。
+
+## 7. 同步命令
 
 所有命令都应在项目根目录执行。
 
-### 6.1 同步指定日期
+### 7.1 同步指定日期
 
 完整同步某一天的流水、销量、退货、取消单、商品资料和当前库存：
 
@@ -224,7 +253,7 @@ PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app --sync 2026-08-23 --no
 
 该命令使用 UPSERT，可用于失败后的单日重跑。
 
-### 6.2 每日完整同步
+### 7.2 每日完整同步
 
 同步系统日期的前一天：
 
@@ -242,7 +271,7 @@ PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app --daily-sync --no-brow
 - 仓库资料
 - 当前库存与当天库存快照
 
-### 6.3 每日任务：同步并生成日报
+### 7.3 每日任务：同步并生成日报
 
 三平台定时任务统一使用：
 
@@ -263,20 +292,20 @@ outputs/daily-report-YYYY-MM-DD/wangdian-supply-chain-daily-YYYY-MM-DD.xlsx
 
 只有同步成功后才会生成日报。任务输出中的 `report_path` 是最终文件路径。
 
-### 6.4 只刷新当前库存
+### 7.4 只刷新当前库存
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app --inventory-sync --no-browser
 ```
 
-### 6.5 补录店铺维度销量
+### 7.5 补录店铺维度销量
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app \
   --backfill-shop-sales 2026-08-01 2026-08-23 --no-browser
 ```
 
-## 7. Excel 日报和周报
+## 8. Excel 日报和周报
 
 网页顶部可直接导出日报和周报，也可以调用：
 
@@ -313,15 +342,17 @@ curl -o daily.xlsx "http://127.0.0.1:5052/api/reports/daily.xlsx?date=2026-08-23
 - 黄色：建议下单日在未来 7 天内
 - 蓝色：建议下单日在 7 天以后
 - 紫色：低销量观察/清仓候选，不产生实际采购量
+
+采购数量以近 7 日周销量 A 计算目标库存，并直接使用该目标库存作为采购量基础；可用库存、采购在途和建议调拨只影响库存天数、缺货风险及下单时间，不再从采购数量中扣减。之后继续应用最低起订量和 50 件倍数取整规则。
 - 无颜色：生产周期等关键参数缺失，只展示不计算
 
-宏博、博凯基础款的每月 5 日和 15 日仅作为执行参考。理论下单日先按“预计缺货日 − 完整交付周期”计算，不使用固定日放大紧急等级。
+宏博、铠博（兼容历史名称“博凯”）基础款的每月 5 日和 20 日仅作为执行参考。理论下单日先按“预计缺货日 − 完整交付周期”计算，不使用固定日放大紧急等级。
 
-## 8. 三个平台的每日定时任务
+## 9. 三个平台的每日定时任务
 
 默认时间均为每天 `01:10`，同步并生成前一天的日报。服务器时区必须是中国标准时间。
 
-### 8.1 macOS：launchd
+### 9.1 macOS：launchd
 
 现成配置：
 
@@ -365,7 +396,7 @@ launchctl bootout gui/$(id -u) \
   ~/Library/LaunchAgents/com.wangdian.inventory-daily.plist
 ```
 
-### 8.2 Linux：systemd user timer
+### 9.2 Linux：systemd user timer
 
 现成配置：
 
@@ -413,7 +444,7 @@ journalctl --user -u wangdian-inventory-daily.service -n 100
 systemctl --user disable --now wangdian-inventory-daily.timer
 ```
 
-### 8.3 Windows：任务计划程序
+### 9.3 Windows：任务计划程序
 
 现成脚本：
 
@@ -454,7 +485,7 @@ Get-Content .\data\daily-sync-error.log -Tail 50
 Unregister-ScheduledTask -TaskName "WangDian Inventory Daily" -Confirm:$false
 ```
 
-## 9. macOS 网页自启动
+## 10. macOS 网页自启动
 
 `deploy/macos/com.wangdian.inventory-web.plist` 用于启动局域网页服务，当前监听 5052 端口。安装方式与每日任务相同：
 
@@ -467,7 +498,7 @@ launchctl bootstrap gui/$(id -u) \
 
 网页服务与每日任务是两个独立进程：网页停止不会删除数据；每日任务也不依赖浏览器保持打开。
 
-## 10. 数据库维护和备份
+## 11. 数据库维护和备份
 
 正式数据库默认是：
 
@@ -475,14 +506,14 @@ launchctl bootstrap gui/$(id -u) \
 data/inventory_production.db
 ```
 
-### 10.1 查看大小
+### 11.1 查看大小
 
 ```bash
 ls -lh data/inventory_production.db*
 du -h data/inventory_production.db*
 ```
 
-### 10.2 安全回收 WAL
+### 11.2 安全回收 WAL
 
 先停止网页和同步任务，确认没有进程占用：
 
@@ -505,7 +536,7 @@ ok
 
 不要在数据库运行时直接删除 `inventory_production.db-wal`。
 
-### 10.3 在线备份
+### 11.3 在线备份
 
 推荐使用 SQLite 自带备份命令，而不是在服务运行时直接复制三个数据库文件：
 
@@ -525,16 +556,16 @@ sqlite3.exe data\inventory_production.db ".backup 'backups/inventory_production-
 
 至少保留最近 7 份日备份和最近 3 份月备份，并定期复制到另一块磁盘或对象存储。
 
-### 10.4 查看最后同步记录
+### 11.4 查看最后同步记录
 
 ```bash
 sqlite3 -header -column data/inventory_production.db \
   "SELECT id,sync_date,status,movement_count,inventory_count,sales_count,return_count,error_message,started_at,finished_at FROM sync_runs ORDER BY id DESC LIMIT 10;"
 ```
 
-## 11. 常见问题
+## 12. 常见问题
 
-### 11.1 `curl https://openapi.huice.com` 返回 404
+### 12.1 `curl https://openapi.huice.com` 返回 404
 
 如果返回类似：
 
@@ -544,7 +575,7 @@ sqlite3 -header -column data/inventory_production.db \
 
 通常说明 DNS、HTTPS 和旺店通网关可以连接，只是访问了没有具体 API 路由的根地址。实际请求必须由 SDK 调用 `/openapi/*.php` 并携带签名参数。
 
-### 11.2 无法连接旺店通网关
+### 12.2 无法连接旺店通网关
 
 依次检查：
 
@@ -555,7 +586,7 @@ python -c "import socket; print(socket.gethostbyname('openapi.huice.com'))"
 
 同时检查代理、防火墙、DNS、系统时间和旺店通接口频率限制。定时任务环境不会自动继承交互式终端中的代理或环境变量，因此优先使用本地配置文件或在服务配置中显式设置。
 
-### 11.3 定时任务没有执行
+### 12.3 定时任务没有执行
 
 先手动运行同一命令：
 
@@ -571,11 +602,11 @@ PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app --daily-job --no-brows
 - Linux：`journalctl --user -u ...`
 - Windows：`Get-ScheduledTaskInfo ...`
 
-### 11.4 报表数据为空
+### 12.4 报表数据为空
 
 先检查 `sync_runs` 最后一条是否成功，再确认报表日期与同步日期一致。库存是当前快照，销量和退货按实际业务日期统计；补同步历史日期时，当前库存仍以执行同步当天从旺店通查询到的库存为准。
 
-## 12. 开发和测试
+## 13. 开发和测试
 
 运行全部自动化测试：
 
@@ -598,7 +629,7 @@ PYTHONPATH=src .venv/bin/python -m wangdian_inventory.app --help
 
 `dist/` 是可重建的发布产物，不属于生产业务数据。
 
-## 13. SDK 单独调用示例
+## 14. SDK 单独调用示例
 
 ```python
 from wangdian import WangdianClient

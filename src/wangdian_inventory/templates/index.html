@@ -25,7 +25,7 @@
         <button type="button" data-view="sales"><i data-lucide="chart-no-axes-combined"></i><span>仓库销量与退货</span></button>
         <button type="button" data-view="shopSales"><i data-lucide="store"></i><span>分店铺统计</span></button>
         <span class="side-nav-label">商品经营</span>
-        <button type="button" data-view="shortNames"><i data-lucide="tags"></i><span>简称汇总</span></button>
+        <button type="button" data-view="shortNames"><i data-lucide="tags"></i><span>商品简称汇总</span></button>
         <button type="button" data-view="replenishment"><i data-lucide="triangle-alert"></i><span>库存预警</span></button>
         <button type="button" data-view="purchasePlan"><i data-lucide="calendar-clock"></i><span>采购计划</span></button>
         <button type="button" data-view="transferPlan"><i data-lucide="arrow-right-left"></i><span>调拨建议</span></button>
@@ -485,9 +485,12 @@
           </div>
         </div>
         <div class="sales-summary">
-          <span>发货量 <strong id="shortSalesQty">--</strong></span>
-          <span>实退量 <strong id="shortReturnQty">--</strong></span>
-          <span>公司净发货 <strong id="shortNetQty">--</strong></span>
+          <span>发货销量 <strong id="shortSalesQty">--</strong></span>
+          <span>近7日发货 <strong id="short7dQty">--</strong></span>
+          <span>近15日发货 <strong id="short15dQty">--</strong></span>
+          <span>近30日发货 <strong id="short30dQty">--</strong></span>
+          <span>实际退货 <strong id="shortReturnQty">--</strong></span>
+          <span>净销量 <strong id="shortNetQty">--</strong></span>
           <span>简称数 <strong id="shortNameCount">--</strong></span>
         </div>
         <div class="table-wrap sales-table-wrap short-table-wrap">
@@ -497,11 +500,18 @@
                 <th>商品简称</th>
                 <th>包含货品</th>
                 <th class="numeric">SKU 数</th>
-                <th class="numeric">发货量</th>
-                <th class="numeric">实退量</th>
-                <th class="numeric">公司净发货</th>
+                <th class="numeric">发货销量</th>
+                <th class="numeric">实际退货</th>
+                <th class="numeric">净销量</th>
+                <th class="numeric">近7日销量</th>
+                <th class="numeric">近15日销量</th>
+                <th class="numeric">近30日销量</th>
                 <th class="numeric">当前库存</th>
-                <th>发货仓分布（非平台渠道）</th>
+                <th class="numeric">可用库存</th>
+                <th class="numeric">采购在途</th>
+                <th class="numeric">趋势系数</th>
+                <th class="numeric">剩余库存天数（含在途）</th>
+                <th>预计缺货日（含在途）</th>
               </tr>
             </thead>
             <tbody id="shortNamesBody"></tbody>

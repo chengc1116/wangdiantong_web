@@ -258,14 +258,11 @@ tbody tr:hover td.sticky-col { background: #f7faf8; }
 .warehouse-cell strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .sticky-sales-sku { white-space: nowrap; }
 .sales-table-wrap table { min-width: 1280px; }
-.short-name-table { min-width: 1120px; }
+.short-name-table { min-width: 1680px; }
 .short-table-wrap { max-height: none; }
 .short-name-cell strong { display: block; font-size: 13px; color: var(--ink); }
 .short-name-cell > span { display: inline-block; margin-top: 3px; padding: 2px 5px; border-radius: 3px; background: var(--amber-soft); color: var(--amber); font-size: 9px; }
 .product-list-cell { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.warehouse-breakdown { min-width: 260px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.warehouse-breakdown span { color: var(--muted); font-size: 10px; white-space: nowrap; }
-.warehouse-breakdown strong { color: #405049; font-weight: 600; }
 .analysis-range { color: var(--muted); font-size: 11px; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .analysis-range label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .analysis-range input[type="date"] { width: 124px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); background: var(--surface); font: inherit; }

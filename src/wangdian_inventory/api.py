@@ -226,7 +226,9 @@ def _generic_query(database: ReadOnlyDatabase, request: QueryRequest) -> Dict[st
             expressions.append(f'{expression} AS "{alias}"')
             output_names.append(alias)
         select_sql = ", ".join(expressions)
-        group_sql = f' GROUP BY {", ".join(f"\"{field}\"" for field in group_by)}' if group_by else ""
+        group_sql = ""
+        if group_by:
+            group_sql = " GROUP BY " + ", ".join(f'"{field}"' for field in group_by)
         count_sql = f'SELECT COUNT(*) AS total FROM (SELECT {select_sql} FROM "{table}"{where}{group_sql}) grouped'
     else:
         selected = fields or columns

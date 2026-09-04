@@ -95,7 +95,59 @@ PYTHONPATH=src \
 
 SQLite 场景暂时使用一个 worker。这样可以避免多个进程各自加载同一份大型 SQLite 文件，也便于和现有同步任务协调。若后续并发量明显增长，再考虑数据库迁移到服务型数据库或增加缓存层，而不是简单增加 worker。
 
-### 2.4 systemd 示例
+### 2.4 服务器出现 `f-string expression part cannot include a backslash` 时的处理
+
+如果服务器启动时报错并指向 `src/wangdian_inventory/api.py` 中类似下面的代码：
+
+```python
+group_sql = f' GROUP BY {", ".join(f"\\"{field}\\"" for field in group_by)}' if group_by else ""
+```
+
+这是 Python 对嵌套 f-string 反斜杠转义的语法兼容问题，不是 SQLite 数据损坏。请在 ECS 项目目录执行下面的修复脚本。该脚本只替换这一段代码，不会覆盖其他业务改动：
+
+```bash
+cd /home/ecs-user/wangdiantong_web
+
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("src/wangdian_inventory/api.py")
+lines = path.read_text().splitlines(keepends=True)
+for index, line in enumerate(lines):
+    if "group_sql = f' GROUP BY" in line:
+        indent = line[:len(line) - len(line.lstrip())]
+        lines[index:index + 1] = [
+            f'{indent}group_sql = ""\n',
+            f'{indent}if group_by:\n',
+            indent + '    group_sql = " GROUP BY " + ", ".join(chr(34) + field + chr(34) for field in group_by)\n',
+        ]
+        path.write_text("".join(lines))
+        print("修复完成")
+        break
+else:
+    raise SystemExit("未找到需要修复的 group_sql 代码，请检查 api.py")
+PY
+```
+
+然后先编译检查：
+
+```bash
+.venv/bin/python -m py_compile src/wangdian_inventory/api.py
+```
+
+编译成功后，再使用**具体数据库文件**启动，不能把 `data` 目录作为数据库路径：
+
+```bash
+WDT_DATABASE=/home/ecs-user/wangdiantong_web/data/inventory_production.db \
+WDT_DEMO_DATA=0 \
+WDT_ENV=production \
+PYTHONPATH=src \
+.venv/bin/python -m wangdian_inventory.api
+```
+
+> 如果服务器上的项目通过 Git 发布，也可以在确认没有未提交改动后执行 `git pull`，但不要使用 `git reset --hard` 或 `git checkout -- .`，避免覆盖服务器已有业务改动。
+
+### 2.5 systemd 示例
 
 项目提供模板 `deploy/linux/wangdian-inventory-api.service`。安装时按云服务器实际项目目录修改 `WorkingDirectory`、`Environment` 和 `ExecStart`，然后执行：
 
